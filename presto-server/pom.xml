@@ -325,6 +325,14 @@
         </dependency>
 
         <dependency>
+            <groupId>com.yscope.presto</groupId>
+            <artifactId>presto-clp</artifactId>
+            <version>${project.version}</version>
+            <type>zip</type>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
             <groupId>com.facebook.presto</groupId>
             <artifactId>presto-druid</artifactId>
             <version>${project.version}</version>

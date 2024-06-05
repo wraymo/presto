@@ -2,6 +2,7 @@
 *.ipr
 *.iws
 target/
+etc/
 /var
 /*/var/
 /presto-product-tests/**/var/
