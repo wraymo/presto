@@ -27,6 +27,7 @@ import com.facebook.presto.spi.SchemaTablePrefix;
 import com.facebook.presto.spi.connector.ConnectorMetadata;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.inject.Inject;
 
 import java.util.List;
 import java.util.Map;
@@ -35,6 +36,14 @@ import java.util.Optional;
 public class ClpMetadata
         implements ConnectorMetadata
 {
+    private final ClpClient clpClient;
+
+    @Inject
+    public ClpMetadata(ClpClient clpClient)
+    {
+        this.clpClient = clpClient;
+    }
+
     @Override
     public List<String> listSchemaNames(ConnectorSession session)
     {
@@ -44,7 +53,11 @@ public class ClpMetadata
     @Override
     public List<SchemaTableName> listTables(ConnectorSession session, Optional<String> schemaName)
     {
-        return ImmutableList.of(new SchemaTableName("default", "example"));
+        ImmutableList.Builder<SchemaTableName> builder = ImmutableList.builder();
+        for (String tableName : clpClient.listTables()) {
+            builder.add(new SchemaTableName("default", tableName));
+        }
+        return builder.build();
     }
 
     @Override
