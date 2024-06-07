@@ -63,7 +63,15 @@ public class ClpMetadata
     @Override
     public ConnectorTableHandle getTableHandle(ConnectorSession session, SchemaTableName tableName)
     {
-        return new ClpTableHandle();
+        if (!listSchemaNames(session).contains(tableName.getSchemaName())) {
+            return null;
+        }
+
+        if (!clpClient.listTables().contains(tableName.getTableName())) {
+            return null;
+        }
+
+        return new ClpTableHandle(tableName.getTableName());
     }
 
     @Override
@@ -91,13 +99,16 @@ public class ClpMetadata
     @Override
     public Map<String, ColumnHandle> getColumnHandles(ConnectorSession session, ConnectorTableHandle tableHandle)
     {
-        return ImmutableMap.of("column1", new ClpColumnHandle());
+        ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle;
+        clpClient.listColumns(clpTableHandle.getTableName());
+
+        return ImmutableMap.of("column1", new ClpColumnHandle(ta));
     }
 
     @Override
     public ColumnMetadata getColumnMetadata(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnHandle columnHandle)
     {
         ClpColumnHandle clpColumnHandle = (ClpColumnHandle) columnHandle;
-        return new ColumnMetadata("column1", VarcharType.VARCHAR);
+        return clpColumnHandle.getColumnMetadata();
     }
 }

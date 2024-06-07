@@ -50,4 +50,26 @@ public class ClpClient
 
         return tableNames.build();
     }
+
+    public Set<String> listColumns(String tableName)
+    {
+        File tableDir = new File(config.getClpArchiveDir(), tableName);
+        if (!tableDir.exists() || !tableDir.isDirectory()) {
+            return ImmutableSet.of();
+        }
+
+        File[] files = tableDir.listFiles();
+        if (files == null) {
+            return ImmutableSet.of();
+        }
+
+        ImmutableSet.Builder<String> columnNames = ImmutableSet.builder();
+        for (File file : files) {
+            if (file.isFile()) {
+                columnNames.add(file.getName());
+            }
+        }
+
+        return columnNames.build();
+    }
 }
