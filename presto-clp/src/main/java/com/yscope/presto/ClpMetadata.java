@@ -13,8 +13,6 @@
  */
 package com.yscope.presto;
 
-import com.facebook.presto.common.type.BigintType;
-import com.facebook.presto.common.type.VarcharType;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.ConnectorSession;
@@ -83,34 +81,33 @@ public class ClpMetadata
     @Override
     public ConnectorTableMetadata getTableMetadata(ConnectorSession session, ConnectorTableHandle table)
     {
-        return new ConnectorTableMetadata(new SchemaTableName("default", "example"),
-                ImmutableList.of(new ColumnMetadata("column1", VarcharType.VARCHAR),
-                        new ColumnMetadata("column2", BigintType.BIGINT)));
+        ClpTableHandle clpTableHandle = (ClpTableHandle) table;
+        String tableName = clpTableHandle.getTableName();
+        List<ColumnMetadata> columns = clpClient.listColumns(tableName).stream()
+                .map(ClpColumnHandle::getColumnMetadata)
+                .collect(ImmutableList.toImmutableList());
+
+        return new ConnectorTableMetadata(new SchemaTableName("default", tableName), columns);
     }
 
     @Override
     public Map<SchemaTableName, List<ColumnMetadata>> listTableColumns(ConnectorSession session,
                                                                        SchemaTablePrefix prefix)
     {
-        return ImmutableMap.of(new SchemaTableName("default", "example"),
-                ImmutableList.of(new ColumnMetadata("column1", VarcharType.VARCHAR),
-                        new ColumnMetadata("column2", BigintType.BIGINT)));
+        return clpClient.listTables().stream()
+                .collect(ImmutableMap.toImmutableMap(
+                        tableName -> new SchemaTableName("default", tableName),
+                        tableName -> getTableMetadata(session, new ClpTableHandle(tableName)).getColumns()));
     }
 
     @Override
     public Map<String, ColumnHandle> getColumnHandles(ConnectorSession session, ConnectorTableHandle tableHandle)
     {
         ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle;
-        clpClient.listColumns(clpTableHandle.getTableName());
-
-        for (ClpColumnHandle columnHandle : clpClient.listColumns(clpTableHandle.getTableName())) {
-            System.out.println(columnHandle.getColumnName());
-        }
-
-        return ImmutableMap.of("column1",
-                new ClpColumnHandle("column1", VarcharType.VARCHAR, true),
-                "column2",
-                new ClpColumnHandle("column2", BigintType.BIGINT, false));
+        return clpClient.listColumns(clpTableHandle.getTableName()).stream()
+                .collect(ImmutableMap.toImmutableMap(
+                        ClpColumnHandle::getColumnName,
+                        column -> column));
     }
 
     @Override

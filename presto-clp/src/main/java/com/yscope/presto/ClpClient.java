@@ -43,6 +43,7 @@ public class ClpClient
 {
     private final ClpConfig config;
     private final Map<String, Set<ClpColumnHandle>> tableNameToColumnHandles;
+    private Set<String> tableNames;
 
     @Inject
     public ClpClient(ClpConfig config)
@@ -53,6 +54,9 @@ public class ClpClient
 
     public Set<String> listTables()
     {
+        if (tableNames != null) {
+            return tableNames;
+        }
         Path archiveDir = Paths.get(config.getClpArchiveDir());
         if (!Files.exists(archiveDir) || !Files.isDirectory(archiveDir)) {
             return ImmutableSet.of();
@@ -65,11 +69,12 @@ public class ClpClient
                     tableNames.add(path.getFileName().toString());
                 }
             }
-            return tableNames.build();
+            this.tableNames = tableNames.build();
         }
         catch (Exception e) {
-            return ImmutableSet.of();
+            this.tableNames = ImmutableSet.of();
         }
+        return this.tableNames;
     }
 
     public Set<ClpColumnHandle> listColumns(String tableName)
