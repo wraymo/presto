@@ -32,7 +32,11 @@ public class ClpRecordSetProvider
     {
     }
 
-    public RecordSet getRecordSet(ConnectorTransactionHandle transactionHandle, ConnectorSession session, ConnectorSplit split, List<? extends ColumnHandle> columns)
+    @Override
+    public RecordSet getRecordSet(ConnectorTransactionHandle transactionHandle,
+                                  ConnectorSession session,
+                                  ConnectorSplit split,
+                                  List<? extends ColumnHandle> columns)
     {
         return null;
     }

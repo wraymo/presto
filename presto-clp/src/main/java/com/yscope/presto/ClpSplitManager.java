@@ -23,7 +23,10 @@ public class ClpSplitManager
         implements ConnectorSplitManager
 {
     @Override
-    public ConnectorSplitSource getSplits(ConnectorTransactionHandle transactionHandle, ConnectorSession session, ConnectorTableLayoutHandle layout, SplitSchedulingContext splitSchedulingContext)
+    public ConnectorSplitSource getSplits(ConnectorTransactionHandle transactionHandle,
+                                          ConnectorSession session,
+                                          ConnectorTableLayoutHandle layout,
+                                          SplitSchedulingContext splitSchedulingContext)
     {
         return null;
     }
