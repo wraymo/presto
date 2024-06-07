@@ -13,63 +13,179 @@
  */
 package com.yscope.presto;
 
+import com.facebook.presto.common.type.BooleanType;
+import com.facebook.presto.common.type.DoubleType;
+import com.facebook.presto.common.type.IntegerType;
+import com.facebook.presto.common.type.Type;
+import com.facebook.presto.common.type.VarcharType;
+import com.github.luben.zstd.ZstdInputStream;
 import com.google.common.collect.ImmutableSet;
 import com.google.inject.Inject;
+import com.yscope.presto.schema.SchemaNode;
+import com.yscope.presto.schema.SchemaTree;
 
-import java.io.File;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class ClpClient
 {
     private final ClpConfig config;
+    private final Map<String, Set<ClpColumnHandle>> tableNameToColumnHandles;
 
     @Inject
     public ClpClient(ClpConfig config)
     {
         this.config = config;
+        this.tableNameToColumnHandles = new HashMap<>();
     }
 
     public Set<String> listTables()
     {
-        File archiveDir = new File(config.getClpArchiveDir());
-        if (!archiveDir.exists() || !archiveDir.isDirectory()) {
+        Path archiveDir = Paths.get(config.getClpArchiveDir());
+        if (!Files.exists(archiveDir) || !Files.isDirectory(archiveDir)) {
             return ImmutableSet.of();
         }
 
-        File[] files = archiveDir.listFiles();
-        if (files == null) {
-            return ImmutableSet.of();
-        }
-
-        ImmutableSet.Builder<String> tableNames = ImmutableSet.builder();
-        for (File file : files) {
-            if (file.isDirectory()) {
-                tableNames.add(file.getName());
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(archiveDir)) {
+            ImmutableSet.Builder<String> tableNames = ImmutableSet.builder();
+            for (Path path : stream) {
+                if (Files.isDirectory(path)) {
+                    tableNames.add(path.getFileName().toString());
+                }
             }
+            return tableNames.build();
         }
-
-        return tableNames.build();
+        catch (Exception e) {
+            return ImmutableSet.of();
+        }
     }
 
-    public Set<String> listColumns(String tableName)
+    public Set<ClpColumnHandle> listColumns(String tableName)
     {
-        File tableDir = new File(config.getClpArchiveDir(), tableName);
-        if (!tableDir.exists() || !tableDir.isDirectory()) {
+        if (tableNameToColumnHandles.containsKey(tableName)) {
+            return tableNameToColumnHandles.get(tableName);
+        }
+
+        Path tableDir = Paths.get(config.getClpArchiveDir(), tableName);
+        HashSet<ClpColumnHandle> columnHandles = new HashSet<>();
+        if (!Files.exists(tableDir) || !Files.isDirectory(tableDir)) {
             return ImmutableSet.of();
         }
 
-        File[] files = tableDir.listFiles();
-        if (files == null) {
-            return ImmutableSet.of();
-        }
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(tableDir)) {
+            ImmutableSet.Builder<String> columnNames = ImmutableSet.builder();
+            for (Path path : stream) {
+                if (Files.isRegularFile(path)) {
+                    continue;
+                }
 
-        ImmutableSet.Builder<String> columnNames = ImmutableSet.builder();
-        for (File file : files) {
-            if (file.isFile()) {
-                columnNames.add(file.getName());
+                // For each directory, get schema_maps file under it
+                Path schemaMapsFile = path.resolve("schema_tree");
+                if (!Files.exists(schemaMapsFile) || !Files.isRegularFile(schemaMapsFile)) {
+                    continue;
+                }
+
+                columnHandles.addAll(parseSchemaTreeFile(schemaMapsFile));
             }
         }
+        catch (Exception e) {
+            tableNameToColumnHandles.put(tableName, ImmutableSet.of());
+            return ImmutableSet.of();
+        }
 
-        return columnNames.build();
+        if (!config.isPolymorphicTypeEnabled()) {
+            tableNameToColumnHandles.put(tableName, columnHandles);
+            return columnHandles;
+        }
+        Set<ClpColumnHandle> polymorphicColumnHandles = handlePolymorphicType(columnHandles);
+        tableNameToColumnHandles.put(tableName, polymorphicColumnHandles);
+        return polymorphicColumnHandles;
+    }
+
+    private Set<ClpColumnHandle> parseSchemaTreeFile(Path schemaMapsFile)
+    {
+        SchemaTree schemaTree = new SchemaTree();
+        try (InputStream fileInputStream = Files.newInputStream(schemaMapsFile);
+                ZstdInputStream zstdInputStream = new ZstdInputStream(fileInputStream);
+                DataInputStream dataInputStream = new DataInputStream(zstdInputStream)) {
+            long numberOfNodes = dataInputStream.readLong();
+            for (int i = 0; i < numberOfNodes; i++) {
+                int parentId = dataInputStream.readInt();
+                long stringSize = dataInputStream.readLong();
+                byte[] stringBytes = new byte[(int) stringSize];
+                dataInputStream.readFully(stringBytes);
+                String name = new String(stringBytes, StandardCharsets.UTF_8);
+                SchemaNode.NodeType type = SchemaNode.NodeType.fromType(dataInputStream.readByte());
+                schemaTree.addNode(parentId, name, type);
+            }
+
+            ArrayList<SchemaNode.NodeTuple> primitiveTypeFields = schemaTree.getPrimitiveFields();
+            HashSet<ClpColumnHandle> columnHandles = new HashSet<>();
+            for (SchemaNode.NodeTuple nodeTuple : primitiveTypeFields) {
+                SchemaNode.NodeType nodeType = nodeTuple.getType();
+                Type prestoType = null;
+                switch (nodeType) {
+                    case Integer:
+                        prestoType = IntegerType.INTEGER;
+                        break;
+                    case Float:
+                        prestoType = DoubleType.DOUBLE;
+                        break;
+                    case ClpString:
+                    case VarString:
+                    case DateString:
+                        prestoType = VarcharType.VARCHAR;
+                        break;
+                    case Boolean:
+                        prestoType = BooleanType.BOOLEAN;
+                        break;
+                    default:
+                        break;
+                }
+                columnHandles.add(new ClpColumnHandle(nodeTuple.getName(), prestoType, true));
+            }
+            return columnHandles;
+        }
+        catch (IOException e) {
+            return ImmutableSet.of();
+        }
+    }
+
+    private Set<ClpColumnHandle> handlePolymorphicType(Set<ClpColumnHandle> columnHandles)
+    {
+        Map<String, List<ClpColumnHandle>> columnNameToColumnHandles = new HashMap<>();
+        Set<ClpColumnHandle> polymorphicColumnHandles = new HashSet<>();
+
+        for (ClpColumnHandle columnHandle : columnHandles) {
+            columnNameToColumnHandles.computeIfAbsent(columnHandle.getColumnName(), k -> new ArrayList<>())
+                    .add(columnHandle);
+        }
+        for (Map.Entry<String, List<ClpColumnHandle>> entry : columnNameToColumnHandles.entrySet()) {
+            List<ClpColumnHandle> columnHandleList = entry.getValue();
+            if (columnHandleList.size() == 1) {
+                polymorphicColumnHandles.add(columnHandleList.get(0));
+            }
+            else {
+                for (ClpColumnHandle columnHandle : columnHandleList) {
+                    polymorphicColumnHandles.add(new ClpColumnHandle(
+                            columnHandle.getColumnName() + "_" + columnHandle.getColumnType().getDisplayName(),
+                            columnHandle.getColumnType(),
+                            columnHandle.isNullable()));
+                }
+            }
+        }
+        return polymorphicColumnHandles;
     }
 }

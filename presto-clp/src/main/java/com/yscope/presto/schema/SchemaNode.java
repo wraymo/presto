@@ -23,6 +23,7 @@ public class SchemaNode
     private final ArrayList<Integer> childrenIds;
     private final String name;
     private final NodeType type;
+
     public SchemaNode(int id, int parentId, String name, NodeType type)
     {
         this.id = id;
@@ -64,7 +65,38 @@ public class SchemaNode
 
     public enum NodeType
     {
-        Integer, Float, ClpString, VarString, Boolean, Object, UnstructuredArray, NullValue, DateString, StructuredArray
+        Integer((byte) 0),
+        Float((byte) 1),
+        ClpString((byte) 2),
+        VarString((byte) 3),
+        Boolean((byte) 4),
+        Object((byte) 5),
+        UnstructuredArray((byte) 6),
+        NullValue((byte) 7),
+        DateString((byte) 8),
+        StructuredArray((byte) 9);
+
+        private final byte type;
+
+        NodeType(byte type)
+        {
+            this.type = type;
+        }
+
+        public static NodeType fromType(byte type)
+        {
+            for (NodeType status : NodeType.values()) {
+                if (status.getType() == type) {
+                    return status;
+                }
+            }
+            throw new IllegalArgumentException("Invalid type code: " + type);
+        }
+
+        public byte getType()
+        {
+            return type;
+        }
     }
 
     public static class NodeTuple
@@ -80,6 +112,26 @@ public class SchemaNode
             this.type = type;
         }
 
+        public NodeTuple(String name, NodeType type)
+        {
+            this(-1, name, type);
+        }
+
+        public NodeType getType()
+        {
+            return type;
+        }
+
+        public int getParentId()
+        {
+            return parentId;
+        }
+
+        public String getName()
+        {
+            return name;
+        }
+
         @Override
         public boolean equals(Object o)
         {
@@ -90,7 +142,9 @@ public class SchemaNode
                 return false;
             }
             NodeTuple tuple = (NodeTuple) o;
-            return Objects.equals(type, tuple.type) && Objects.equals(parentId, tuple.parentId) && Objects.equals(name, tuple.name);
+            return Objects.equals(type, tuple.type) &&
+                    Objects.equals(parentId, tuple.parentId) &&
+                    Objects.equals(name, tuple.name);
         }
 
         @Override

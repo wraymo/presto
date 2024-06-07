@@ -21,13 +21,18 @@ public class SchemaTree
 {
     private final ArrayList<SchemaNode> schemaNodes;
     private final Map<SchemaNode.NodeTuple, Integer> nodeMap;
-    private final ArrayList<Integer> primitiveTypeIds;
+    private final ArrayList<SchemaNode.NodeTuple> primitiveTypeFields;
 
     public SchemaTree()
     {
         schemaNodes = new ArrayList<>();
-        primitiveTypeIds = new ArrayList<>();
-        nodeMap = new HashMap<SchemaNode.NodeTuple, Integer>();
+        primitiveTypeFields = new ArrayList<>();
+        nodeMap = new HashMap<>();
+    }
+
+    public ArrayList<SchemaNode.NodeTuple> getPrimitiveFields()
+    {
+        return primitiveTypeFields;
     }
 
     public int addNode(int parentId, String name, SchemaNode.NodeType type)
@@ -44,14 +49,20 @@ public class SchemaTree
         if (parentId >= 0) {
             schemaNodes.get(parentId).addChild(id);
         }
+
         if (type != SchemaNode.NodeType.Object) {
-            primitiveTypeIds.add(id);
+            primitiveTypeFields.add(new SchemaNode.NodeTuple(getKeyName(id, name), type));
         }
         return id;
     }
 
-    public getPrimitiveFields()
+    private String getKeyName(int id, String key)
     {
-        return primitiveTypeIds;
+        SchemaNode node = schemaNodes.get(id);
+        if (node.getParentId() < 0) {
+            return key;
+        }
+
+        return getKeyName(node.getParentId(), node.getName() + "." + key);
     }
 }

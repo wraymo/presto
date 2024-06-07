@@ -83,17 +83,18 @@ public class ClpMetadata
     @Override
     public ConnectorTableMetadata getTableMetadata(ConnectorSession session, ConnectorTableHandle table)
     {
-        return new ConnectorTableMetadata(new SchemaTableName("default", "example"), ImmutableList.of(
-                new ColumnMetadata("column1", VarcharType.VARCHAR),
-                new ColumnMetadata("column2", BigintType.BIGINT)));
+        return new ConnectorTableMetadata(new SchemaTableName("default", "example"),
+                ImmutableList.of(new ColumnMetadata("column1", VarcharType.VARCHAR),
+                        new ColumnMetadata("column2", BigintType.BIGINT)));
     }
 
     @Override
-    public Map<SchemaTableName, List<ColumnMetadata>> listTableColumns(ConnectorSession session, SchemaTablePrefix prefix)
+    public Map<SchemaTableName, List<ColumnMetadata>> listTableColumns(ConnectorSession session,
+                                                                       SchemaTablePrefix prefix)
     {
-        return ImmutableMap.of(new SchemaTableName("default", "example"), ImmutableList.of(
-                new ColumnMetadata("column1", VarcharType.VARCHAR),
-                new ColumnMetadata("column2", BigintType.BIGINT)));
+        return ImmutableMap.of(new SchemaTableName("default", "example"),
+                ImmutableList.of(new ColumnMetadata("column1", VarcharType.VARCHAR),
+                        new ColumnMetadata("column2", BigintType.BIGINT)));
     }
 
     @Override
@@ -102,11 +103,20 @@ public class ClpMetadata
         ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle;
         clpClient.listColumns(clpTableHandle.getTableName());
 
-        return ImmutableMap.of("column1", new ClpColumnHandle(ta));
+        for (ClpColumnHandle columnHandle : clpClient.listColumns(clpTableHandle.getTableName())) {
+            System.out.println(columnHandle.getColumnName());
+        }
+
+        return ImmutableMap.of("column1",
+                new ClpColumnHandle("column1", VarcharType.VARCHAR, true),
+                "column2",
+                new ClpColumnHandle("column2", BigintType.BIGINT, false));
     }
 
     @Override
-    public ColumnMetadata getColumnMetadata(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnHandle columnHandle)
+    public ColumnMetadata getColumnMetadata(ConnectorSession session,
+                                            ConnectorTableHandle tableHandle,
+                                            ColumnHandle columnHandle)
     {
         ClpColumnHandle clpColumnHandle = (ClpColumnHandle) columnHandle;
         return clpColumnHandle.getColumnMetadata();

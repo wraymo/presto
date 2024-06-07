@@ -18,6 +18,7 @@ import com.facebook.airlift.configuration.Config;
 public class ClpConfig
 {
     private String clpArchiveDir;
+    private boolean polymorphicTypeEnabled;
 
     public String getClpArchiveDir()
     {
@@ -28,6 +29,18 @@ public class ClpConfig
     public ClpConfig setClpArchiveDir(String clpArchiveDir)
     {
         this.clpArchiveDir = clpArchiveDir;
+        return this;
+    }
+
+    public boolean isPolymorphicTypeEnabled()
+    {
+        return polymorphicTypeEnabled;
+    }
+
+    @Config("polymorphic-type-enabled")
+    public ClpConfig setPolymorphicTypeEnabled(boolean polymorphicTypeEnabled)
+    {
+        this.polymorphicTypeEnabled = polymorphicTypeEnabled;
         return this;
     }
 }

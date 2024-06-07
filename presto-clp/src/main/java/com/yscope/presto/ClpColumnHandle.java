@@ -69,7 +69,7 @@ public class ClpColumnHandle
     @Override
     public int hashCode()
     {
-        return Objects.hash(columnName);
+        return Objects.hash(columnName, columnType);
     }
 
     @Override
@@ -82,7 +82,8 @@ public class ClpColumnHandle
             return false;
         }
         ClpColumnHandle other = (ClpColumnHandle) obj;
-        return Objects.equals(this.columnName, other.columnName);
+        return Objects.equals(this.columnName, other.columnName) &&
+                Objects.equals(this.columnType, other.columnType);
     }
 
     @Override

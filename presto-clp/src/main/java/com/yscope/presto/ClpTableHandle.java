@@ -17,6 +17,8 @@ import com.facebook.presto.spi.ConnectorTableHandle;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Objects;
+
 public class ClpTableHandle
         implements ConnectorTableHandle
 {
