@@ -1,0 +1,4 @@
+{"a": 36, "c": {"e": "Hello"}}
+{"a": 25, "b": 18.36, "c": {"d": false, "e": "world"}}
+{"a": "foo", "b": "bar", "c": true}
+{"a": "baz", "b": "multiple words"}

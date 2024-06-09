@@ -51,7 +51,7 @@ public class SchemaTree
         }
 
         if (type != SchemaNode.NodeType.Object) {
-            primitiveTypeFields.add(new SchemaNode.NodeTuple(getKeyName(id, name), type));
+            primitiveTypeFields.add(new SchemaNode.NodeTuple(getKeyName(parentId, name), type));
         }
         return id;
     }

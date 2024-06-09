@@ -27,6 +27,9 @@ import com.yscope.presto.schema.SchemaTree;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigInteger;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -57,6 +60,7 @@ public class ClpClient
         if (tableNames != null) {
             return tableNames;
         }
+        System.out.println("Working Directory = " + System.getProperty("user.dir"));
         Path archiveDir = Paths.get(config.getClpArchiveDir());
         if (!Files.exists(archiveDir) || !Files.isDirectory(archiveDir)) {
             return ImmutableSet.of();
@@ -125,10 +129,15 @@ public class ClpClient
         try (InputStream fileInputStream = Files.newInputStream(schemaMapsFile);
                 ZstdInputStream zstdInputStream = new ZstdInputStream(fileInputStream);
                 DataInputStream dataInputStream = new DataInputStream(zstdInputStream)) {
-            long numberOfNodes = dataInputStream.readLong();
+            byte[] longBytes = new byte[8];
+            byte[] intBytes = new byte[4];
+            dataInputStream.readFully(longBytes);
+            long numberOfNodes = ByteBuffer.wrap(longBytes).order(ByteOrder.nativeOrder()).getLong();
             for (int i = 0; i < numberOfNodes; i++) {
-                int parentId = dataInputStream.readInt();
-                long stringSize = dataInputStream.readLong();
+                dataInputStream.readFully(intBytes);
+                int parentId = ByteBuffer.wrap(intBytes).order(ByteOrder.nativeOrder()).getInt();
+                dataInputStream.readFully(longBytes);
+                long stringSize = ByteBuffer.wrap(longBytes).order(ByteOrder.nativeOrder()).getLong();
                 byte[] stringBytes = new byte[(int) stringSize];
                 dataInputStream.readFully(stringBytes);
                 String name = new String(stringBytes, StandardCharsets.UTF_8);

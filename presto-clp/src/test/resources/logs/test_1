@@ -1,0 +1,4 @@
+{"a": 1, "b": 2.0, "c": {"d": true, "e": "Hello world"}}
+{"a": 2, "b": 3.0, "c": {"d": false, "e": "Goodbye world"}}
+{"a": "foo", "b": "bar", "c": 2.0}
+{"a": "baz", "b": "qux"}
