@@ -29,7 +29,7 @@ public class ClpModule
         binder.bind(ClpMetadata.class).in(Scopes.SINGLETON);
         binder.bind(ClpSplitManager.class).in(Scopes.SINGLETON);
         binder.bind(ClpRecordSetProvider.class).in(Scopes.SINGLETON);
-        // TODO: bind ClpClient
+        binder.bind(ClpClient.class).in(Scopes.SINGLETON);
         configBinder(binder).bindConfig(ClpConfig.class);
     }
 

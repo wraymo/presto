@@ -25,6 +25,9 @@ import com.google.inject.Inject;
 import com.yscope.presto.schema.SchemaNode;
 import com.yscope.presto.schema.SchemaTree;
 
+import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
+
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -51,6 +54,7 @@ public class ClpClient
     private final ClpConfig config;
     private final Path executablePath;
     private final Map<String, Set<ClpColumnHandle>> tableNameToColumnHandles;
+    private final Path decompressDir;
     private Set<String> tableNames;
 
     @Inject
@@ -59,6 +63,29 @@ public class ClpClient
         this.config = requireNonNull(config, "config is null");
         this.tableNameToColumnHandles = new HashMap<>();
         this.executablePath = getExecutablePath();
+        this.decompressDir = Paths.get(System.getProperty("java.io.tmpdir"), "clp_decompress");
+    }
+
+    @PostConstruct
+    public void start()
+    {
+        try {
+            Files.createDirectories(decompressDir);
+        }
+        catch (IOException e) {
+            log.error(e, "Failed to create decompression directory");
+        }
+    }
+
+    @PreDestroy
+    public void close()
+    {
+        try {
+            Files.deleteIfExists(decompressDir);
+        }
+        catch (IOException e) {
+            log.error(e, "Failed to delete decompression directory");
+        }
     }
 
     public ClpConfig getConfig()
@@ -177,7 +204,7 @@ public class ClpClient
             return null;
         }
 
-        Path decompressFile = Paths.get(config.getClpDecompressDir(), tableName, "original");
+        Path decompressFile = decompressDir.resolve(tableName).resolve("original");
         if (!Files.exists(decompressFile) || !Files.isRegularFile(decompressFile)) {
             if (!DecompressRecords(tableName)) {
                 return null;
@@ -195,12 +222,15 @@ public class ClpClient
 
     private boolean DecompressRecords(String tableName)
     {
-        Path decompressDir = Paths.get(config.getClpDecompressDir(), tableName);
-        Path tableDir = Paths.get(config.getClpArchiveDir(), tableName);
+        Path tableDecompressDir = decompressDir.resolve(tableName);
+        Path tableArchiveDir = Paths.get(config.getClpArchiveDir(), tableName);
 
         try {
             ProcessBuilder processBuilder =
-                    new ProcessBuilder(executablePath.toString(), "x", tableDir.toString(), decompressDir.toString());
+                    new ProcessBuilder(executablePath.toString(),
+                            "x",
+                            tableArchiveDir.toString(),
+                            tableDecompressDir.toString());
             Process process = processBuilder.start();
             process.waitFor();
             return process.exitValue() == 0;

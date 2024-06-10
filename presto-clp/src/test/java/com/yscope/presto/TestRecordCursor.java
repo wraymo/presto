@@ -13,6 +13,19 @@
  */
 package com.yscope.presto;
 
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
+
+@Test(singleThreaded = true)
 public class TestRecordCursor
 {
+    private ClpClient clpClient;
+    @BeforeMethod
+    public void setUp()
+    {
+        ClpConfig config = new ClpConfig().setClpArchiveDir("src/test/resources/clp_archive")
+                .setPolymorphicTypeEnabled(true)
+                .setClpExecutablePath("/usr/local/bin/clp-s");
+        clpClient = new ClpClient(config);
+    }
 }

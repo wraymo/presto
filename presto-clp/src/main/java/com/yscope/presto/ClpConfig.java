@@ -19,7 +19,6 @@ public class ClpConfig
 {
     private String clpExecutablePath;
     private String clpArchiveDir;
-    private String clpDecompressDir;
     private boolean polymorphicTypeEnabled;
 
     public String getClpExecutablePath()
@@ -43,18 +42,6 @@ public class ClpConfig
     public ClpConfig setClpArchiveDir(String clpArchiveDir)
     {
         this.clpArchiveDir = clpArchiveDir;
-        return this;
-    }
-
-    public String getClpDecompressDir()
-    {
-        return clpDecompressDir;
-    }
-
-    @Config("decompress-dir")
-    public ClpConfig setClpDecompressDir(String clpDecompressDir)
-    {
-        this.clpDecompressDir = clpDecompressDir;
         return this;
     }
 
