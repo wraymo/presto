@@ -17,7 +17,11 @@ import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.HostAddress;
 import com.facebook.presto.spi.NodeProvider;
 import com.facebook.presto.spi.schedule.NodeSelectionStrategy;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableList;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 
@@ -26,6 +30,30 @@ import static com.facebook.presto.spi.schedule.NodeSelectionStrategy.NO_PREFEREN
 public class ClpSplit
         implements ConnectorSplit
 {
+    private final String schemaName;
+    private final String tableName;
+
+    @JsonCreator
+    public ClpSplit(@JsonProperty("schemaName") @Nullable String schemaName,
+                    @JsonProperty("tableName") @Nullable String tableName)
+    {
+        this.schemaName = schemaName;
+        this.tableName = tableName;
+    }
+
+    @JsonProperty
+    @Nullable
+    public String getSchemaName()
+    {
+        return schemaName;
+    }
+
+    @JsonProperty
+    public String getTableName()
+    {
+        return tableName;
+    }
+
     @Override
     public NodeSelectionStrategy getNodeSelectionStrategy()
     {

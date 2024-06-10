@@ -13,6 +13,7 @@
  */
 package com.yscope.presto;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.common.type.BooleanType;
 import com.facebook.presto.common.type.DoubleType;
 import com.facebook.presto.common.type.IntegerType;
@@ -24,10 +25,10 @@ import com.google.inject.Inject;
 import com.yscope.presto.schema.SchemaNode;
 import com.yscope.presto.schema.SchemaTree;
 
+import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -42,17 +43,56 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static java.util.Objects.requireNonNull;
+
 public class ClpClient
 {
+    private static final Logger log = Logger.get(ClpClient.class);
     private final ClpConfig config;
+    private final Path executablePath;
     private final Map<String, Set<ClpColumnHandle>> tableNameToColumnHandles;
     private Set<String> tableNames;
 
     @Inject
     public ClpClient(ClpConfig config)
     {
-        this.config = config;
+        this.config = requireNonNull(config, "config is null");
         this.tableNameToColumnHandles = new HashMap<>();
+        this.executablePath = getExecutablePath();
+    }
+
+    private Path getExecutablePath()
+    {
+        String executablePathString = config.getClpExecutablePath();
+        if (executablePathString == null || executablePathString.isEmpty()) {
+            Path executablePath = getExecutablePathFromEnvironment();
+            if (executablePath == null) {
+                throw new RuntimeException("CLP executable path is not set");
+            }
+            return executablePath;
+        }
+        Path executablePath = Paths.get(executablePathString);
+        if (!Files.exists(executablePath) || !Files.isRegularFile(executablePath)) {
+            executablePath = getExecutablePathFromEnvironment();
+            if (executablePath == null) {
+                throw new RuntimeException("CLP executable path is not set");
+            }
+        }
+        return executablePath;
+    }
+
+    private Path getExecutablePathFromEnvironment()
+    {
+        String executablePathString = System.getenv("CLP_EXECUTABLE_PATH");
+        if (executablePathString == null || executablePathString.isEmpty()) {
+            return null;
+        }
+
+        Path executablePath = Paths.get(executablePathString);
+        if (!Files.exists(executablePath) || !Files.isRegularFile(executablePath)) {
+            return null;
+        }
+        return executablePath;
     }
 
     public Set<String> listTables()
@@ -60,10 +100,14 @@ public class ClpClient
         if (tableNames != null) {
             return tableNames;
         }
-        System.out.println("Working Directory = " + System.getProperty("user.dir"));
+        if (config.getClpArchiveDir() == null || config.getClpArchiveDir().isEmpty()) {
+            tableNames = ImmutableSet.of();
+            return tableNames;
+        }
         Path archiveDir = Paths.get(config.getClpArchiveDir());
         if (!Files.exists(archiveDir) || !Files.isDirectory(archiveDir)) {
-            return ImmutableSet.of();
+            tableNames = ImmutableSet.of();
+            return tableNames;
         }
 
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(archiveDir)) {
@@ -94,7 +138,6 @@ public class ClpClient
         }
 
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(tableDir)) {
-            ImmutableSet.Builder<String> columnNames = ImmutableSet.builder();
             for (Path path : stream) {
                 if (Files.isRegularFile(path)) {
                     continue;
@@ -121,6 +164,46 @@ public class ClpClient
         Set<ClpColumnHandle> polymorphicColumnHandles = handlePolymorphicType(columnHandles);
         tableNameToColumnHandles.put(tableName, polymorphicColumnHandles);
         return polymorphicColumnHandles;
+    }
+
+    public BufferedReader getRecords(String tableName)
+    {
+        if (!listTables().contains(tableName)) {
+            return null;
+        }
+
+        Path decompressFile = Paths.get(config.getClpDecompressDir(), tableName, "original");
+        if (!Files.exists(decompressFile) || !Files.isRegularFile(decompressFile)) {
+            if (!DecompressRecords(tableName)) {
+                return null;
+            }
+        }
+
+        try {
+            return Files.newBufferedReader(decompressFile);
+        }
+        catch (IOException e) {
+            log.error(e, "Failed to get records for table %s", tableName);
+            return null;
+        }
+    }
+
+    private boolean DecompressRecords(String tableName)
+    {
+        Path decompressDir = Paths.get(config.getClpDecompressDir(), tableName);
+        Path tableDir = Paths.get(config.getClpArchiveDir(), tableName);
+
+        try {
+            ProcessBuilder processBuilder =
+                    new ProcessBuilder(executablePath.toString(), "x", tableDir.toString(), decompressDir.toString());
+            Process process = processBuilder.start();
+            process.waitFor();
+            return process.exitValue() == 0;
+        }
+        catch (IOException | InterruptedException e) {
+            log.error(e, "Failed to decompress records for table %s", tableName);
+            return false;
+        }
     }
 
     private Set<ClpColumnHandle> parseSchemaTreeFile(Path schemaMapsFile)

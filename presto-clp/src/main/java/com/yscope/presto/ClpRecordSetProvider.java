@@ -19,6 +19,7 @@ import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.RecordSet;
 import com.facebook.presto.spi.connector.ConnectorRecordSetProvider;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
+import com.google.common.collect.ImmutableList;
 
 import javax.inject.Inject;
 
@@ -27,9 +28,12 @@ import java.util.List;
 public class ClpRecordSetProvider
         implements ConnectorRecordSetProvider
 {
+    ClpClient clpClient;
+
     @Inject
-    public ClpRecordSetProvider()
+    public ClpRecordSetProvider(ClpClient clpClient)
     {
+        this.clpClient = clpClient;
     }
 
     @Override
@@ -38,6 +42,11 @@ public class ClpRecordSetProvider
                                   ConnectorSplit split,
                                   List<? extends ColumnHandle> columns)
     {
-        return null;
+        ClpSplit clpSplit = (ClpSplit) split;
+        ImmutableList.Builder<ClpColumnHandle> handles = ImmutableList.builder();
+        for (ColumnHandle handle : columns) {
+            handles.add((ClpColumnHandle) handle);
+        }
+        return new ClpRecordSet(clpClient.getRecords(clpSplit.getTableName()), handles.build());
     }
 }

@@ -17,11 +17,22 @@ import com.facebook.presto.common.type.Type;
 import com.facebook.presto.spi.RecordCursor;
 import com.facebook.presto.spi.RecordSet;
 
+import java.io.BufferedReader;
 import java.util.List;
+
+import static java.util.Objects.requireNonNull;
 
 public class ClpRecordSet
         implements RecordSet
 {
+    private final BufferedReader reader;
+    private final List<ClpColumnHandle> columnHandles;
+    public ClpRecordSet(BufferedReader reader, List<ClpColumnHandle> columnHandles)
+    {
+        this.reader = requireNonNull(reader, "reader is null");
+        this.columnHandles = requireNonNull(columnHandles, "column handles is null");
+    }
+
     @Override
     public List<Type> getColumnTypes()
     {
@@ -31,6 +42,6 @@ public class ClpRecordSet
     @Override
     public RecordCursor cursor()
     {
-        return null;
+        return new ClpRecordCursor(reader, columnHandles);
     }
 }
