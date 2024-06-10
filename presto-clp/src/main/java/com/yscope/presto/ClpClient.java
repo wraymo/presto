@@ -61,6 +61,11 @@ public class ClpClient
         this.executablePath = getExecutablePath();
     }
 
+    public ClpConfig getConfig()
+    {
+        return config;
+    }
+
     private Path getExecutablePath()
     {
         String executablePathString = config.getClpExecutablePath();

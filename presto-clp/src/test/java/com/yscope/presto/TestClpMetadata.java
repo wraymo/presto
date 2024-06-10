@@ -24,6 +24,7 @@ import com.google.common.collect.ImmutableList;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Optional;
 
@@ -38,8 +39,9 @@ public class TestClpMetadata
     @BeforeMethod
     public void setUp()
     {
-        ClpConfig config =
-                new ClpConfig().setClpArchiveDir("src/test/resources/clp_archive").setPolymorphicTypeEnabled(true);
+        ClpConfig config = new ClpConfig().setClpArchiveDir("src/test/resources/clp_archive")
+                .setPolymorphicTypeEnabled(true)
+                .setClpExecutablePath("/usr/local/bin/clp-s");
         metadata = new ClpMetadata(new ClpClient(config));
     }
 
@@ -146,5 +148,15 @@ public class TestClpMetadata
                 .setNullable(true)
                 .build());
         assertEquals(columnMetadata, new HashSet<>(tableMetadata.getColumns()));
+    }
+
+    @Test
+    public void testGetTableHandle()
+    {
+        ArrayList<String> t = new ArrayList<String>(2);
+        if (t.get(0) == null) {
+            System.out.println("null");
+        }
+        t.set(0, "default");
     }
 }

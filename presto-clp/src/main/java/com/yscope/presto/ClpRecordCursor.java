@@ -15,22 +15,44 @@ package com.yscope.presto;
 
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.spi.RecordCursor;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.airlift.slice.Slice;
+import io.airlift.slice.Slices;
 
 import java.io.BufferedReader;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+
+import static com.facebook.presto.common.type.BigintType.BIGINT;
+import static com.facebook.presto.common.type.BooleanType.BOOLEAN;
+import static com.facebook.presto.common.type.DoubleType.DOUBLE;
+import static com.facebook.presto.common.type.IntegerType.INTEGER;
+import static com.facebook.presto.common.type.VarcharType.VARCHAR;
+import static com.facebook.presto.common.type.VarcharType.createUnboundedVarcharType;
+import static com.google.common.base.Preconditions.checkArgument;
 
 public class ClpRecordCursor
         implements RecordCursor
 {
     private final BufferedReader reader;
+    private final boolean isPolymorphicTypeEnabled;
     private final List<ClpColumnHandle> columnHandles;
+    private final List<String> fields;
 
-    public ClpRecordCursor(BufferedReader reader, List<ClpColumnHandle> columnHandles)
+    public ClpRecordCursor(BufferedReader reader, boolean isPolymorphicTypeEnabled, List<ClpColumnHandle> columnHandles)
     {
         this.reader = reader;
+        this.isPolymorphicTypeEnabled = isPolymorphicTypeEnabled;
         this.columnHandles = columnHandles;
+        this.fields = new ArrayList<>(columnHandles.size());
+        for (int i = 0; i < columnHandles.size(); i++) {
+            fields.add(null);
+        }
     }
+
     @Override
     public long getCompletedBytes()
     {
@@ -46,16 +68,20 @@ public class ClpRecordCursor
     @Override
     public Type getType(int field)
     {
-        return null;
+        return columnHandles.get(field).getColumnType();
     }
 
     @Override
     public boolean advanceNextPosition()
     {
         try {
-            if (reader.readLine() == null) {
+            String line = reader.readLine();
+            if (line == null) {
                 return false;
             }
+            fields.replaceAll(ignored -> null);
+            JsonNode node = new ObjectMapper().readTree(line);
+            parseLine(node, "");
         }
         catch (Exception e) {
             return false;
@@ -64,28 +90,38 @@ public class ClpRecordCursor
         return false;
     }
 
+    private void checkFieldType(int field, Type expected)
+    {
+        Type actual = getType(field);
+        checkArgument(actual.equals(expected), "Expected field %s to be type %s but is %s", field, expected, actual);
+    }
+
     @Override
     public boolean getBoolean(int field)
     {
-        return false;
+        checkFieldType(field, BOOLEAN);
+        return Boolean.parseBoolean(fields.get(field));
     }
 
     @Override
     public long getLong(int field)
     {
-        return 0;
+        checkFieldType(field, BIGINT);
+        return Long.parseLong(fields.get(field));
     }
 
     @Override
     public double getDouble(int field)
     {
-        return 0;
+        checkFieldType(field, DOUBLE);
+        return Double.parseDouble(fields.get(field));
     }
 
     @Override
     public Slice getSlice(int field)
     {
-        return null;
+        checkFieldType(field, createUnboundedVarcharType());
+        return Slices.utf8Slice(fields.get(field));
     }
 
     @Override
@@ -97,11 +133,63 @@ public class ClpRecordCursor
     @Override
     public boolean isNull(int field)
     {
-        return false;
+        return fields.get(field) == null;
     }
 
     @Override
     public void close()
     {
+    }
+
+    private void parseLine(JsonNode node, String prefix)
+    {
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                String key = field.getKey();
+                JsonNode value = field.getValue();
+                parseLine(value, prefix.isEmpty() ? key : prefix + "." + key);
+            }
+        }
+        else {
+            int index = getFieldIndex(prefix, node);
+            if (index == -1) {
+                return;
+            }
+            fields.set(index, node.toString());
+        }
+    }
+
+    private String jsonNodeToTypeString(JsonNode node)
+    {
+        if (node.isIntegralNumber()) {
+            return INTEGER.getDisplayName();
+        }
+        if (node.isFloatingPointNumber()) {
+            return DOUBLE.getDisplayName();
+        }
+        if (node.isBoolean()) {
+            return BOOLEAN.getDisplayName();
+        }
+        if (node.isTextual()) {
+            return VARCHAR.getDisplayName();
+        }
+        return "unknown";
+    }
+
+    private int getFieldIndex(String fieldName, JsonNode node)
+    {
+        for (int i = 0; i < columnHandles.size(); i++) {
+            if (columnHandles.get(i).getColumnName().equals(fieldName)) {
+                return i;
+            }
+
+            if (isPolymorphicTypeEnabled && (fieldName + "_" + jsonNodeToTypeString(node)).equals(columnHandles.get(i)
+                    .getColumnName())) {
+                return i;
+            }
+        }
+        return -1;
     }
 }

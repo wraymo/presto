@@ -27,9 +27,12 @@ public class ClpRecordSet
 {
     private final BufferedReader reader;
     private final List<ClpColumnHandle> columnHandles;
-    public ClpRecordSet(BufferedReader reader, List<ClpColumnHandle> columnHandles)
+    private final boolean isPolymorphicTypeEnabled;
+
+    public ClpRecordSet(BufferedReader reader, boolean isPolymorphicTypeEnabled, List<ClpColumnHandle> columnHandles)
     {
         this.reader = requireNonNull(reader, "reader is null");
+        this.isPolymorphicTypeEnabled = isPolymorphicTypeEnabled;
         this.columnHandles = requireNonNull(columnHandles, "column handles is null");
     }
 
@@ -42,6 +45,6 @@ public class ClpRecordSet
     @Override
     public RecordCursor cursor()
     {
-        return new ClpRecordCursor(reader, columnHandles);
+        return new ClpRecordCursor(reader, isPolymorphicTypeEnabled, columnHandles);
     }
 }
