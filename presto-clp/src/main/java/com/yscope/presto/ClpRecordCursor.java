@@ -26,7 +26,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import static com.facebook.presto.common.type.BigintType.BIGINT;
 import static com.facebook.presto.common.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.common.type.DoubleType.DOUBLE;
 import static com.facebook.presto.common.type.IntegerType.INTEGER;
@@ -40,7 +39,7 @@ public class ClpRecordCursor
     private final BufferedReader reader;
     private final boolean isPolymorphicTypeEnabled;
     private final List<ClpColumnHandle> columnHandles;
-    private final List<String> fields;
+    private final List<JsonNode> fields;
 
     public ClpRecordCursor(BufferedReader reader, boolean isPolymorphicTypeEnabled, List<ClpColumnHandle> columnHandles)
     {
@@ -100,28 +99,28 @@ public class ClpRecordCursor
     public boolean getBoolean(int field)
     {
         checkFieldType(field, BOOLEAN);
-        return Boolean.parseBoolean(fields.get(field));
+        return fields.get(field).asBoolean();
     }
 
     @Override
     public long getLong(int field)
     {
-        checkFieldType(field, BIGINT);
-        return Long.parseLong(fields.get(field));
+        checkFieldType(field, INTEGER);
+        return fields.get(field).asLong();
     }
 
     @Override
     public double getDouble(int field)
     {
         checkFieldType(field, DOUBLE);
-        return Double.parseDouble(fields.get(field));
+        return fields.get(field).asDouble();
     }
 
     @Override
     public Slice getSlice(int field)
     {
         checkFieldType(field, createUnboundedVarcharType());
-        return Slices.utf8Slice(fields.get(field));
+        return Slices.utf8Slice(fields.get(field).asText());
     }
 
     @Override
@@ -157,7 +156,7 @@ public class ClpRecordCursor
             if (index == -1) {
                 return;
             }
-            fields.set(index, node.toString());
+            fields.set(index, node);
         }
     }
 

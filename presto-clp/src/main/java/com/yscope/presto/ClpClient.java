@@ -36,12 +36,15 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -81,7 +84,27 @@ public class ClpClient
     public void close()
     {
         try {
-            Files.deleteIfExists(decompressDir);
+            Files.walkFileTree(decompressDir, new SimpleFileVisitor<Path>()
+            {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException
+                {
+                    Files.delete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException
+                {
+                    if (exc == null) {
+                        Files.delete(dir);
+                        return FileVisitResult.CONTINUE;
+                    }
+                    else {
+                        throw exc; // Directory iteration failed
+                    }
+                }
+            });
         }
         catch (IOException e) {
             log.error(e, "Failed to delete decompression directory");
@@ -164,7 +187,7 @@ public class ClpClient
         }
 
         Path tableDir = Paths.get(config.getClpArchiveDir(), tableName);
-        HashSet<ClpColumnHandle> columnHandles = new HashSet<>();
+        LinkedHashSet<ClpColumnHandle> columnHandles = new LinkedHashSet<>();
         if (!Files.exists(tableDir) || !Files.isDirectory(tableDir)) {
             return ImmutableSet.of();
         }
@@ -245,8 +268,8 @@ public class ClpClient
     {
         SchemaTree schemaTree = new SchemaTree();
         try (InputStream fileInputStream = Files.newInputStream(schemaMapsFile);
-             ZstdInputStream zstdInputStream = new ZstdInputStream(fileInputStream);
-             DataInputStream dataInputStream = new DataInputStream(zstdInputStream)) {
+                ZstdInputStream zstdInputStream = new ZstdInputStream(fileInputStream);
+                DataInputStream dataInputStream = new DataInputStream(zstdInputStream)) {
             byte[] longBytes = new byte[8];
             byte[] intBytes = new byte[4];
             dataInputStream.readFully(longBytes);
@@ -264,7 +287,7 @@ public class ClpClient
             }
 
             ArrayList<SchemaNode.NodeTuple> primitiveTypeFields = schemaTree.getPrimitiveFields();
-            HashSet<ClpColumnHandle> columnHandles = new HashSet<>();
+            LinkedHashSet<ClpColumnHandle> columnHandles = new LinkedHashSet<>();
             for (SchemaNode.NodeTuple nodeTuple : primitiveTypeFields) {
                 SchemaNode.NodeType nodeType = nodeTuple.getType();
                 Type prestoType = null;
@@ -298,7 +321,7 @@ public class ClpClient
     private Set<ClpColumnHandle> handlePolymorphicType(Set<ClpColumnHandle> columnHandles)
     {
         Map<String, List<ClpColumnHandle>> columnNameToColumnHandles = new HashMap<>();
-        Set<ClpColumnHandle> polymorphicColumnHandles = new HashSet<>();
+        LinkedHashSet<ClpColumnHandle> polymorphicColumnHandles = new LinkedHashSet<>();
 
         for (ClpColumnHandle columnHandle : columnHandles) {
             columnNameToColumnHandles.computeIfAbsent(columnHandle.getColumnName(), k -> new ArrayList<>())

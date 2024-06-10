@@ -20,7 +20,9 @@ import org.testng.annotations.Test;
 import java.util.ArrayList;
 
 import static com.facebook.presto.testing.TestingConnectorSession.SESSION;
+import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNotNull;
+import static org.testng.Assert.assertTrue;
 
 @Test(singleThreaded = true)
 public class TestRecordCursor
@@ -50,6 +52,10 @@ public class TestRecordCursor
         ClpRecordCursor cursor = (ClpRecordCursor) recordSet.cursor();
         assertNotNull(cursor, "cursor is null");
         cursor.advanceNextPosition();
+        assertEquals(cursor.getLong(0), 1);
+        assertEquals(cursor.getDouble(2), 2.0);
+        assertTrue(cursor.getBoolean(5));
+        assertEquals(cursor.getSlice(6).toStringUtf8(), "Hello world");
         cursor.advanceNextPosition();
     }
 
