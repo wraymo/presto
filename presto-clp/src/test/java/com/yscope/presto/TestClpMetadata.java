@@ -72,8 +72,18 @@ public class TestClpMetadata
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
+                .setName("a_varchar")
+                .setType(VarcharType.VARCHAR)
+                .setNullable(true)
+                .build());
+        columnMetadata.add(ColumnMetadata.builder()
                 .setName("b_double")
                 .setType(DoubleType.DOUBLE)
+                .setNullable(true)
+                .build());
+        columnMetadata.add(ColumnMetadata.builder()
+                .setName("b_varchar")
+                .setType(VarcharType.VARCHAR)
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
@@ -83,16 +93,6 @@ public class TestClpMetadata
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
                 .setName("c.e")
-                .setType(VarcharType.VARCHAR)
-                .setNullable(true)
-                .build());
-        columnMetadata.add(ColumnMetadata.builder()
-                .setName("a_varchar")
-                .setType(VarcharType.VARCHAR)
-                .setNullable(true)
-                .build());
-        columnMetadata.add(ColumnMetadata.builder()
-                .setName("b_varchar")
                 .setType(VarcharType.VARCHAR)
                 .setNullable(true)
                 .build());
@@ -113,28 +113,13 @@ public class TestClpMetadata
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
-                .setName("b.c")
+                .setName("a_varchar")
                 .setType(VarcharType.VARCHAR)
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
                 .setName("b_integer")
                 .setType(IntegerType.INTEGER)
-                .setNullable(true)
-                .build());
-        columnMetadata.add(ColumnMetadata.builder()
-                .setName("c.d")
-                .setType(VarcharType.VARCHAR)
-                .setNullable(true)
-                .build());
-        columnMetadata.add(ColumnMetadata.builder()
-                .setName("c.e")
-                .setType(BooleanType.BOOLEAN)
-                .setNullable(true)
-                .build());
-        columnMetadata.add(ColumnMetadata.builder()
-                .setName("a_varchar")
-                .setType(VarcharType.VARCHAR)
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
@@ -147,16 +132,21 @@ public class TestClpMetadata
                 .setType(BooleanType.BOOLEAN)
                 .setNullable(true)
                 .build());
+        columnMetadata.add(ColumnMetadata.builder()
+                .setName("b.c")
+                .setType(VarcharType.VARCHAR)
+                .setNullable(true)
+                .build());
+        columnMetadata.add(ColumnMetadata.builder()
+                .setName("c.d")
+                .setType(VarcharType.VARCHAR)
+                .setNullable(true)
+                .build());
+        columnMetadata.add(ColumnMetadata.builder()
+                .setName("c.e")
+                .setType(BooleanType.BOOLEAN)
+                .setNullable(true)
+                .build());
         assertEquals(columnMetadata, new HashSet<>(tableMetadata.getColumns()));
-    }
-
-    @Test
-    public void testGetTableHandle()
-    {
-        ArrayList<String> t = new ArrayList<String>(2);
-        if (t.get(0) == null) {
-            System.out.println("null");
-        }
-        t.set(0, "default");
     }
 }

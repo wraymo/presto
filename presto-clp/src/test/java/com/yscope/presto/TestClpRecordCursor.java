@@ -25,7 +25,7 @@ import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertTrue;
 
 @Test(singleThreaded = true)
-public class TestRecordCursor
+public class TestClpRecordCursor
 {
     private ClpClient clpClient;
 
