@@ -14,20 +14,39 @@
 package com.yscope.presto;
 
 import com.facebook.presto.spi.ConnectorSession;
+import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.ConnectorSplitSource;
 import com.facebook.presto.spi.ConnectorTableLayoutHandle;
+import com.facebook.presto.spi.FixedSplitSource;
 import com.facebook.presto.spi.connector.ConnectorSplitManager;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
+
+import java.util.Collections;
+import java.util.List;
 
 public class ClpSplitManager
         implements ConnectorSplitManager
 {
+    private final ClpClient clpClient;
+
+    public ClpSplitManager(ClpClient clpClient)
+    {
+        this.clpClient = clpClient;
+    }
+
     @Override
     public ConnectorSplitSource getSplits(ConnectorTransactionHandle transactionHandle,
                                           ConnectorSession session,
                                           ConnectorTableLayoutHandle layout,
                                           SplitSchedulingContext splitSchedulingContext)
     {
-        return null;
+        ClpTableLayoutHandle layoutHandle = (ClpTableLayoutHandle) layout;
+        ClpTableHandle tableHandle = layoutHandle.getTable();
+        if (!clpClient.listTables().contains(tableHandle.getTableName())) {
+            throw new RuntimeException("Table no longer exists: " + tableHandle.getTableName());
+        }
+        List<ConnectorSplit> splits = Collections.singletonList(new ClpSplit("default", tableHandle.getTableName()));
+
+        return new FixedSplitSource(splits);
     }
 }

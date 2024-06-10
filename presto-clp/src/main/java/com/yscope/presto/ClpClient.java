@@ -21,12 +21,12 @@ import com.facebook.presto.common.type.Type;
 import com.facebook.presto.common.type.VarcharType;
 import com.github.luben.zstd.ZstdInputStream;
 import com.google.common.collect.ImmutableSet;
-import com.google.inject.Inject;
 import com.yscope.presto.schema.SchemaNode;
 import com.yscope.presto.schema.SchemaTree;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
+import javax.inject.Inject;
 
 import java.io.BufferedReader;
 import java.io.DataInputStream;
@@ -245,8 +245,8 @@ public class ClpClient
     {
         SchemaTree schemaTree = new SchemaTree();
         try (InputStream fileInputStream = Files.newInputStream(schemaMapsFile);
-                ZstdInputStream zstdInputStream = new ZstdInputStream(fileInputStream);
-                DataInputStream dataInputStream = new DataInputStream(zstdInputStream)) {
+             ZstdInputStream zstdInputStream = new ZstdInputStream(fileInputStream);
+             DataInputStream dataInputStream = new DataInputStream(zstdInputStream)) {
             byte[] longBytes = new byte[8];
             byte[] intBytes = new byte[4];
             dataInputStream.readFully(longBytes);

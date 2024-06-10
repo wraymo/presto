@@ -13,13 +13,20 @@
  */
 package com.yscope.presto;
 
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
+
+import java.util.ArrayList;
+
+import static com.facebook.presto.testing.TestingConnectorSession.SESSION;
+import static org.testng.Assert.assertNotNull;
 
 @Test(singleThreaded = true)
 public class TestRecordCursor
 {
     private ClpClient clpClient;
+
     @BeforeMethod
     public void setUp()
     {
@@ -27,5 +34,28 @@ public class TestRecordCursor
                 .setPolymorphicTypeEnabled(true)
                 .setClpExecutablePath("/usr/local/bin/clp-s");
         clpClient = new ClpClient(config);
+        clpClient.start();
+    }
+
+    @Test
+    public void testRecordCursor()
+    {
+        ClpRecordSetProvider recordSetProvider = new ClpRecordSetProvider(clpClient);
+        ClpRecordSet recordSet = (ClpRecordSet) recordSetProvider.getRecordSet(
+                ClpTransactionHandle.INSTANCE,
+                SESSION,
+                new ClpSplit("default", "test_1_table"),
+                new ArrayList<>(clpClient.listColumns("test_1_table")));
+        assertNotNull(recordSet, "recordSet is null");
+        ClpRecordCursor cursor = (ClpRecordCursor) recordSet.cursor();
+        assertNotNull(cursor, "cursor is null");
+        cursor.advanceNextPosition();
+        cursor.advanceNextPosition();
+    }
+
+    @AfterMethod
+    public void tearDown()
+    {
+        clpClient.close();
     }
 }

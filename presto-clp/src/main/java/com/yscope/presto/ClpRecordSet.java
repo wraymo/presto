@@ -16,6 +16,7 @@ package com.yscope.presto;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.spi.RecordCursor;
 import com.facebook.presto.spi.RecordSet;
+import com.google.common.collect.ImmutableList;
 
 import java.io.BufferedReader;
 import java.util.List;
@@ -39,7 +40,7 @@ public class ClpRecordSet
     @Override
     public List<Type> getColumnTypes()
     {
-        return null;
+        return columnHandles.stream().map(ClpColumnHandle::getColumnType).collect(ImmutableList.toImmutableList());
     }
 
     @Override
