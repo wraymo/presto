@@ -54,9 +54,10 @@ public class TestClpMetadata
     @Test
     public void testListTables()
     {
-        assertEquals(metadata.listTables(SESSION, Optional.empty()),
-                ImmutableList.of(new SchemaTableName("default", "test_1_table"),
-                        new SchemaTableName("default", "test_2_table")));
+        HashSet<SchemaTableName> tables = new HashSet<>();
+        tables.add(new SchemaTableName("default", "test_1_table"));
+        tables.add(new SchemaTableName("default", "test_2_table"));
+        assertEquals(new HashSet<>(metadata.listTables(SESSION, Optional.empty())), tables);
     }
 
     @Test

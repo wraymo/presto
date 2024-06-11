@@ -55,11 +55,9 @@ public class ClpMetadata
     @Override
     public List<SchemaTableName> listTables(ConnectorSession session, Optional<String> schemaName)
     {
-        ImmutableList.Builder<SchemaTableName> builder = ImmutableList.builder();
-        for (String tableName : clpClient.listTables()) {
-            builder.add(new SchemaTableName("default", tableName));
-        }
-        return builder.build();
+        return clpClient.listTables().stream()
+                .map(tableName -> new SchemaTableName("default", tableName))
+                .collect(ImmutableList.toImmutableList());
     }
 
     @Override
