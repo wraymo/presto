@@ -86,7 +86,7 @@ public class ClpRecordCursor
             return false;
         }
 
-        return false;
+        return true;
     }
 
     private void checkFieldType(int field, Type expected)

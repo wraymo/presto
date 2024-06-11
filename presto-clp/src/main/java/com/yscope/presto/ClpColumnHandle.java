@@ -16,6 +16,7 @@ package com.yscope.presto;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Objects;
@@ -29,6 +30,7 @@ public class ClpColumnHandle
     private final Type columnType;
     private final boolean nullable;
 
+    @JsonCreator
     public ClpColumnHandle(
             @JsonProperty("columnName") String columnName,
             @JsonProperty("columnType") Type columnType,

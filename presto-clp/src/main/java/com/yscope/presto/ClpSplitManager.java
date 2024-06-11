@@ -21,6 +21,8 @@ import com.facebook.presto.spi.FixedSplitSource;
 import com.facebook.presto.spi.connector.ConnectorSplitManager;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
 
+import javax.inject.Inject;
+
 import java.util.Collections;
 import java.util.List;
 
@@ -29,6 +31,7 @@ public class ClpSplitManager
 {
     private final ClpClient clpClient;
 
+    @Inject
     public ClpSplitManager(ClpClient clpClient)
     {
         this.clpClient = clpClient;
