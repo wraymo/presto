@@ -232,6 +232,7 @@ public class ClpClient
             if (!DecompressRecords(tableName)) {
                 return null;
             }
+            log.info("Decompress records to %s", decompressFile.toString());
         }
 
         try {

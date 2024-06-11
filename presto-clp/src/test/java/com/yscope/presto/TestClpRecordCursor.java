@@ -18,9 +18,11 @@ import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 import java.util.ArrayList;
+import java.util.List;
 
 import static com.facebook.presto.testing.TestingConnectorSession.SESSION;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertTrue;
 
@@ -39,8 +41,15 @@ public class TestClpRecordCursor
         clpClient.start();
     }
 
+    public void assertNull(ClpRecordCursor cursor, List<Integer> indices)
+    {
+        for (int index : indices) {
+            assertTrue(cursor.isNull(index));
+        }
+    }
+
     @Test
-    public void testRecordCursor()
+    public void testTable1RecordCursor()
     {
         ClpRecordSetProvider recordSetProvider = new ClpRecordSetProvider(clpClient);
         ClpRecordSet recordSet = (ClpRecordSet) recordSetProvider.getRecordSet(
@@ -51,12 +60,47 @@ public class TestClpRecordCursor
         assertNotNull(recordSet, "recordSet is null");
         ClpRecordCursor cursor = (ClpRecordCursor) recordSet.cursor();
         assertNotNull(cursor, "cursor is null");
-        cursor.advanceNextPosition();
+        assertTrue(cursor.advanceNextPosition());
         assertEquals(cursor.getLong(0), 1);
         assertEquals(cursor.getDouble(2), 2.0);
         assertTrue(cursor.getBoolean(5));
         assertEquals(cursor.getSlice(6).toStringUtf8(), "Hello world");
-        cursor.advanceNextPosition();
+        assertNull(cursor, List.of(1, 3, 4));
+        assertTrue(cursor.advanceNextPosition());
+        assertEquals(cursor.getLong(0), 2);
+        assertEquals(cursor.getDouble(2), 3.0);
+        assertFalse(cursor.getBoolean(5));
+        assertEquals(cursor.getSlice(6).toStringUtf8(), "Goodbye world");
+        assertNull(cursor, List.of(1, 3, 4));
+        assertTrue(cursor.advanceNextPosition());
+        assertEquals(cursor.getSlice(1).toStringUtf8(), "foo");
+        assertEquals(cursor.getSlice(3).toStringUtf8(), "bar");
+        assertEquals(cursor.getDouble(4), 2.0);
+        assertNull(cursor, List.of(0, 2, 5, 6));
+        assertTrue(cursor.advanceNextPosition());
+        assertEquals(cursor.getSlice(1).toStringUtf8(), "baz");
+        assertEquals(cursor.getSlice(3).toStringUtf8(), "qux");
+        assertNull(cursor, List.of(0, 2, 4, 5, 6));
+        assertFalse(cursor.advanceNextPosition());
+    }
+
+    @Test
+    public void testTable2RecordCursor()
+    {
+        ClpRecordSetProvider recordSetProvider = new ClpRecordSetProvider(clpClient);
+        ClpRecordSet recordSet = (ClpRecordSet) recordSetProvider.getRecordSet(
+                ClpTransactionHandle.INSTANCE,
+                SESSION,
+                new ClpSplit("default", "test_2_table"),
+                new ArrayList<>(clpClient.listColumns("test_2_table")));
+        assertNotNull(recordSet, "recordSet is null");
+        ClpRecordCursor cursor = (ClpRecordCursor) recordSet.cursor();
+        assertNotNull(cursor, "cursor is null");
+        for (int i = 0; i <= 12; i++) {
+            assertTrue(cursor.advanceNextPosition());
+            assertEquals(cursor.getLong(3), i);
+        }
+        assertFalse(cursor.advanceNextPosition());
     }
 
     @AfterMethod

@@ -108,43 +108,28 @@ public class TestClpMetadata
         ConnectorTableMetadata tableMetadata = metadata.getTableMetadata(SESSION, clpTableHandle);
         HashSet<ColumnMetadata> columnMetadata = new HashSet<>();
         columnMetadata.add(ColumnMetadata.builder()
-                .setName("a_double")
-                .setType(DoubleType.DOUBLE)
-                .setNullable(true)
-                .build());
-        columnMetadata.add(ColumnMetadata.builder()
-                .setName("a_varchar")
-                .setType(VarcharType.VARCHAR)
-                .setNullable(true)
-                .build());
-        columnMetadata.add(ColumnMetadata.builder()
-                .setName("b_integer")
+                .setName("id")
                 .setType(IntegerType.INTEGER)
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
-                .setName("b_varchar")
+                .setName("name")
                 .setType(VarcharType.VARCHAR)
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
-                .setName("c")
-                .setType(BooleanType.BOOLEAN)
+                .setName("age")
+                .setType(IntegerType.INTEGER)
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
-                .setName("b.c")
+                .setName("city")
                 .setType(VarcharType.VARCHAR)
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
-                .setName("c.d")
+                .setName("state")
                 .setType(VarcharType.VARCHAR)
-                .setNullable(true)
-                .build());
-        columnMetadata.add(ColumnMetadata.builder()
-                .setName("c.e")
-                .setType(BooleanType.BOOLEAN)
                 .setNullable(true)
                 .build());
         assertEquals(columnMetadata, new HashSet<>(tableMetadata.getColumns()));
