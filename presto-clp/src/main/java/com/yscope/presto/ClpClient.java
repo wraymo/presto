@@ -14,9 +14,9 @@
 package com.yscope.presto;
 
 import com.facebook.airlift.log.Logger;
+import com.facebook.presto.common.type.BigintType;
 import com.facebook.presto.common.type.BooleanType;
 import com.facebook.presto.common.type.DoubleType;
-import com.facebook.presto.common.type.IntegerType;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.common.type.VarcharType;
 import com.github.luben.zstd.ZstdInputStream;
@@ -294,7 +294,7 @@ public class ClpClient
                 Type prestoType = null;
                 switch (nodeType) {
                     case Integer:
-                        prestoType = IntegerType.INTEGER;
+                        prestoType = BigintType.BIGINT;
                         break;
                     case Float:
                         prestoType = DoubleType.DOUBLE;
@@ -302,6 +302,8 @@ public class ClpClient
                     case ClpString:
                     case VarString:
                     case DateString:
+                    case UnstructuredArray:
+                    case NullValue:
                         prestoType = VarcharType.VARCHAR;
                         break;
                     case Boolean:

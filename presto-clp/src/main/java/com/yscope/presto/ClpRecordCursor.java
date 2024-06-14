@@ -26,9 +26,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import static com.facebook.presto.common.type.BigintType.BIGINT;
 import static com.facebook.presto.common.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.common.type.DoubleType.DOUBLE;
-import static com.facebook.presto.common.type.IntegerType.INTEGER;
 import static com.facebook.presto.common.type.VarcharType.VARCHAR;
 import static com.facebook.presto.common.type.VarcharType.createUnboundedVarcharType;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -105,7 +105,7 @@ public class ClpRecordCursor
     @Override
     public long getLong(int field)
     {
-        checkFieldType(field, INTEGER);
+        checkFieldType(field, BIGINT);
         return fields.get(field).asLong();
     }
 
@@ -120,7 +120,13 @@ public class ClpRecordCursor
     public Slice getSlice(int field)
     {
         checkFieldType(field, createUnboundedVarcharType());
-        return Slices.utf8Slice(fields.get(field).asText());
+        JsonNode node = fields.get(field);
+        if (node.isArray()) {
+            return Slices.utf8Slice(node.toString());
+        }
+        else {
+            return Slices.utf8Slice(node.asText());
+        }
     }
 
     @Override
@@ -132,7 +138,7 @@ public class ClpRecordCursor
     @Override
     public boolean isNull(int field)
     {
-        return fields.get(field) == null;
+        return fields.get(field) == null || fields.get(field).isNull();
     }
 
     @Override
@@ -163,7 +169,7 @@ public class ClpRecordCursor
     private String jsonNodeToTypeString(JsonNode node)
     {
         if (node.isIntegralNumber()) {
-            return INTEGER.getDisplayName();
+            return BIGINT.getDisplayName();
         }
         if (node.isFloatingPointNumber()) {
             return DOUBLE.getDisplayName();
@@ -171,7 +177,7 @@ public class ClpRecordCursor
         if (node.isBoolean()) {
             return BOOLEAN.getDisplayName();
         }
-        if (node.isTextual()) {
+        if (node.isTextual() || node.isArray() || node.isNull()) {
             return VARCHAR.getDisplayName();
         }
         return "unknown";
