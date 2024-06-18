@@ -13,6 +13,7 @@
  */
 package com.yscope.presto;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.spi.RecordCursor;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -36,6 +37,11 @@ import static com.google.common.base.Preconditions.checkArgument;
 public class ClpRecordCursor
         implements RecordCursor
 {
+    private static final Logger log = Logger.get(ClpRecordCursor.class);
+    private long readLineTime;
+    private long parseLineTime;
+    private long parseFieldTime;
+    private long getFieldTime;
     private final BufferedReader reader;
     private final boolean isPolymorphicTypeEnabled;
     private final List<ClpColumnHandle> columnHandles;
@@ -50,6 +56,10 @@ public class ClpRecordCursor
         for (int i = 0; i < columnHandles.size(); i++) {
             fields.add(null);
         }
+        readLineTime = 0;
+        parseLineTime = 0;
+        parseFieldTime = 0;
+        getFieldTime = 0;
     }
 
     @Override
@@ -74,13 +84,22 @@ public class ClpRecordCursor
     public boolean advanceNextPosition()
     {
         try {
+            long startTs = System.currentTimeMillis();
             String line = reader.readLine();
+            long endTs = System.currentTimeMillis();
+            readLineTime += endTs - startTs;
             if (line == null) {
                 return false;
             }
             fields.replaceAll(ignored -> null);
+            startTs = System.currentTimeMillis();
             JsonNode node = new ObjectMapper().readTree(line);
+            endTs = System.currentTimeMillis();
+            parseLineTime += endTs - startTs;
+            startTs = System.currentTimeMillis();
             parseLine(node, "");
+            endTs = System.currentTimeMillis();
+            parseFieldTime += endTs - startTs;
         }
         catch (Exception e) {
             return false;
@@ -98,35 +117,52 @@ public class ClpRecordCursor
     @Override
     public boolean getBoolean(int field)
     {
+        long startTs = System.currentTimeMillis();
         checkFieldType(field, BOOLEAN);
-        return fields.get(field).asBoolean();
+        boolean result = fields.get(field).asBoolean();
+        long endTs = System.currentTimeMillis();
+        getFieldTime += endTs - startTs;
+        return result;
     }
 
     @Override
     public long getLong(int field)
     {
+        long startTs = System.currentTimeMillis();
         checkFieldType(field, BIGINT);
-        return fields.get(field).asLong();
+        long result = fields.get(field).asLong();
+        long endTs = System.currentTimeMillis();
+        getFieldTime += endTs - startTs;
+        return result;
     }
 
     @Override
     public double getDouble(int field)
     {
+        long startTs = System.currentTimeMillis();
         checkFieldType(field, DOUBLE);
-        return fields.get(field).asDouble();
+        double result = fields.get(field).asDouble();
+        long endTs = System.currentTimeMillis();
+        getFieldTime += endTs - startTs;
+        return result;
     }
 
     @Override
     public Slice getSlice(int field)
     {
+        long startTs = System.currentTimeMillis();
         checkFieldType(field, createUnboundedVarcharType());
         JsonNode node = fields.get(field);
+        Slice result;
         if (node.isArray()) {
-            return Slices.utf8Slice(node.toString());
+            result = Slices.utf8Slice(node.toString());
         }
         else {
-            return Slices.utf8Slice(node.asText());
+            result = Slices.utf8Slice(node.asText());
         }
+        long endTs = System.currentTimeMillis();
+        getFieldTime += endTs - startTs;
+        return result;
     }
 
     @Override
@@ -144,6 +180,10 @@ public class ClpRecordCursor
     @Override
     public void close()
     {
+        log.info("Read line time: %d ms", readLineTime);
+        log.info("Parse line time: %d ms", parseLineTime);
+        log.info("Parse field time: %d ms", parseFieldTime);
+        log.info("Get field time: %d ms", getFieldTime);
     }
 
     private void parseLine(JsonNode node, String prefix)

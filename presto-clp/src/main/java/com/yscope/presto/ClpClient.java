@@ -232,7 +232,6 @@ public class ClpClient
             if (!DecompressRecords(tableName)) {
                 return null;
             }
-            log.info("Decompress records to %s", decompressFile.toString());
         }
 
         try {
@@ -246,6 +245,7 @@ public class ClpClient
 
     private boolean DecompressRecords(String tableName)
     {
+        long startTime = System.currentTimeMillis();
         Path tableDecompressDir = decompressDir.resolve(tableName);
         Path tableArchiveDir = Paths.get(config.getClpArchiveDir(), tableName);
 
@@ -257,6 +257,7 @@ public class ClpClient
                             tableDecompressDir.toString());
             Process process = processBuilder.start();
             process.waitFor();
+            log.info("Decompress records for table %s in %d ms", tableName, System.currentTimeMillis() - startTime);
             return process.exitValue() == 0;
         }
         catch (IOException | InterruptedException e) {
