@@ -48,9 +48,8 @@ public class ClpSplitManager
         if (!clpClient.listTables().contains(tableHandle.getTableName())) {
             throw new RuntimeException("Table no longer exists: " + tableHandle.getTableName());
         }
-        List<ConnectorSplit> splits = Collections.singletonList(new ClpSplit("default",
-                tableHandle.getTableName(),
-                tableHandle.getQuery()));
+        List<ConnectorSplit> splits =
+                Collections.singletonList(new ClpSplit("default", tableHandle.getTableName(), layoutHandle.getQuery()));
 
         return new FixedSplitSource(splits);
     }

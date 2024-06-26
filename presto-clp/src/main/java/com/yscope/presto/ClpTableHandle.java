@@ -18,26 +18,16 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Objects;
-import java.util.Optional;
 
 public class ClpTableHandle
         implements ConnectorTableHandle
 {
     private final String tableName;
-    private final Optional<String> query;
 
     @JsonCreator
-    public ClpTableHandle(@JsonProperty("tableName") String tableName,
-                          @JsonProperty("query") Optional<String> query)
+    public ClpTableHandle(@JsonProperty("tableName") String tableName)
     {
         this.tableName = tableName;
-        this.query = query;
-    }
-
-    @JsonProperty
-    public Optional<String> getQuery()
-    {
-        return query;
     }
 
     @JsonProperty

@@ -71,7 +71,7 @@ public class ClpMetadata
             return null;
         }
 
-        return new ClpTableHandle(tableName.getTableName(), Optional.empty());
+        return new ClpTableHandle(tableName.getTableName());
     }
 
     @Override
@@ -81,7 +81,7 @@ public class ClpMetadata
                                                             Optional<Set<ColumnHandle>> desiredColumns)
     {
         ClpTableHandle tableHandle = (ClpTableHandle) table;
-        ConnectorTableLayout layout = new ConnectorTableLayout(new ClpTableLayoutHandle(tableHandle));
+        ConnectorTableLayout layout = new ConnectorTableLayout(new ClpTableLayoutHandle(tableHandle, Optional.empty()));
         return ImmutableList.of(new ConnectorTableLayoutResult(layout, constraint.getSummary()));
     }
 
@@ -111,7 +111,7 @@ public class ClpMetadata
                 .collect(ImmutableMap.toImmutableMap(
                         tableName -> new SchemaTableName("default", tableName),
                         tableName -> getTableMetadata(session,
-                                new ClpTableHandle(tableName, Optional.empty())).getColumns()));
+                                new ClpTableHandle(tableName)).getColumns()));
     }
 
     @Override

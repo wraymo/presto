@@ -36,15 +36,6 @@ import static com.facebook.presto.spi.ConnectorPlanRewriter.rewriteWith;
 public class ClpPlanOptimizer
         implements ConnectorPlanOptimizer
 {
-    @Override
-    public PlanNode optimize(PlanNode maxSubplan,
-                             ConnectorSession session,
-                             VariableAllocator variableAllocator,
-                             PlanNodeIdAllocator idAllocator)
-    {
-        return rewriteWith(new Rewriter(idAllocator), maxSubplan);
-    }
-
     public static String buildKqlQuery(RowExpression additionalPredicate)
     {
         if (additionalPredicate instanceof SpecialFormExpression) {
@@ -108,6 +99,15 @@ public class ClpPlanOptimizer
         throw new RuntimeException("Unsupported predicate type");
     }
 
+    @Override
+    public PlanNode optimize(PlanNode maxSubplan,
+                             ConnectorSession session,
+                             VariableAllocator variableAllocator,
+                             PlanNodeIdAllocator idAllocator)
+    {
+        return rewriteWith(new Rewriter(idAllocator), maxSubplan);
+    }
+
     private static class Rewriter
             extends ConnectorPlanRewriter<Void>
     {
@@ -128,16 +128,15 @@ public class ClpPlanOptimizer
             TableScanNode tableScanNode = (TableScanNode) node.getSource();
             TableHandle tableHandle = tableScanNode.getTable();
             ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle.getConnectorHandle();
-
+            ClpTableLayoutHandle clpTableLayoutHandle = new ClpTableLayoutHandle(clpTableHandle, Optional.of(buildKqlQuery(node.getPredicate())));
             return new TableScanNode(
                     node.getSourceLocation(),
                     idAllocator.getNextId(),
                     new TableHandle(
                             tableHandle.getConnectorId(),
-                            new ClpTableHandle(clpTableHandle.getTableName(),
-                                    Optional.of(buildKqlQuery(node.getPredicate()))),
+                            clpTableHandle,
                             tableHandle.getTransaction(),
-                            tableHandle.getLayout()),
+                            Optional.of(clpTableLayoutHandle)),
                     tableScanNode.getOutputVariables(),
                     tableScanNode.getAssignments(),
                     tableScanNode.getTableConstraints(),
