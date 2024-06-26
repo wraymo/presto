@@ -14,7 +14,6 @@
 package com.yscope.presto;
 
 import com.facebook.presto.spi.ConnectorTableHandle;
-import com.facebook.presto.spi.relation.RowExpression;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
