@@ -35,12 +35,6 @@ public class ClpTableHandle
         this.predicate = predicate;
     }
 
-    @JsonCreator
-    public ClpTableHandle(@JsonProperty("tableName") String tableName)
-    {
-        this(tableName, Optional.empty());
-    }
-
     @JsonProperty
     public Optional<RowExpression> getPredicate()
     {

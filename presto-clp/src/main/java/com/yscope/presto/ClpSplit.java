@@ -46,13 +46,6 @@ public class ClpSplit
         this.additionalPredicate = additionalPredicate;
     }
 
-    @JsonCreator
-    public ClpSplit(@JsonProperty("schemaName") @Nullable String schemaName,
-                    @JsonProperty("tableName") @Nullable String tableName)
-    {
-        this(schemaName, tableName, Optional.empty());
-    }
-
     @JsonProperty
     @Nullable
     public String getSchemaName()

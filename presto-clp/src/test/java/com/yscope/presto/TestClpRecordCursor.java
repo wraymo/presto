@@ -14,7 +14,6 @@
 package com.yscope.presto;
 
 import com.facebook.presto.common.type.BigintType;
-import com.facebook.presto.common.type.IntegerType;
 import com.facebook.presto.metadata.FunctionAndTypeManager;
 import com.facebook.presto.spi.relation.CallExpression;
 import com.facebook.presto.spi.relation.VariableReferenceExpression;
@@ -67,7 +66,7 @@ public class TestClpRecordCursor
         ClpRecordSet recordSet = (ClpRecordSet) recordSetProvider.getRecordSet(
                 ClpTransactionHandle.INSTANCE,
                 SESSION,
-                new ClpSplit("default", "test_1_table"),
+                new ClpSplit("default", "test_1_table", Optional.empty()),
                 new ArrayList<>(clpClient.listColumns("test_1_table")));
         assertNotNull(recordSet, "recordSet is null");
         ClpRecordCursor cursor = (ClpRecordCursor) recordSet.cursor();
@@ -103,7 +102,7 @@ public class TestClpRecordCursor
         ClpRecordSet recordSet = (ClpRecordSet) recordSetProvider.getRecordSet(
                 ClpTransactionHandle.INSTANCE,
                 SESSION,
-                new ClpSplit("default", "test_2_table"),
+                new ClpSplit("default", "test_2_table", Optional.empty()),
                 new ArrayList<>(clpClient.listColumns("test_2_table")));
         assertNotNull(recordSet, "recordSet is null");
         ClpRecordCursor cursor = (ClpRecordCursor) recordSet.cursor();

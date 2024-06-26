@@ -71,7 +71,7 @@ public class ClpMetadata
             return null;
         }
 
-        return new ClpTableHandle(tableName.getTableName());
+        return new ClpTableHandle(tableName.getTableName(), Optional.empty());
     }
 
     @Override
@@ -110,7 +110,8 @@ public class ClpMetadata
         return clpClient.listTables().stream()
                 .collect(ImmutableMap.toImmutableMap(
                         tableName -> new SchemaTableName("default", tableName),
-                        tableName -> getTableMetadata(session, new ClpTableHandle(tableName)).getColumns()));
+                        tableName -> getTableMetadata(session,
+                                new ClpTableHandle(tableName, Optional.empty())).getColumns()));
     }
 
     @Override
