@@ -15,6 +15,10 @@ package com.yscope.presto;
 
 import com.facebook.presto.spi.ConnectorPlanOptimizer;
 import com.facebook.presto.spi.connector.ConnectorPlanOptimizerProvider;
+import com.facebook.presto.spi.function.FunctionMetadataManager;
+import com.facebook.presto.spi.function.StandardFunctionResolution;
+import com.facebook.presto.spi.relation.DeterminismEvaluator;
+import com.facebook.presto.spi.relation.ExpressionOptimizer;
 import com.google.common.collect.ImmutableSet;
 
 import javax.inject.Inject;
@@ -24,9 +28,21 @@ import java.util.Set;
 public class ClpPlanOptimizerProvider
         implements ConnectorPlanOptimizerProvider
 {
+    private final FunctionMetadataManager functionManager;
+    private final StandardFunctionResolution functionResolution;
+    private final DeterminismEvaluator determinismEvaluator;
+    private final ExpressionOptimizer expressionOptimizer;
+
     @Inject
-    public ClpPlanOptimizerProvider()
+    public ClpPlanOptimizerProvider(FunctionMetadataManager functionManager,
+                                    StandardFunctionResolution functionResolution,
+                                    DeterminismEvaluator determinismEvaluator,
+                                    ExpressionOptimizer expressionOptimizer)
     {
+        this.functionManager = functionManager;
+        this.functionResolution = functionResolution;
+        this.determinismEvaluator = determinismEvaluator;
+        this.expressionOptimizer = expressionOptimizer;
     }
 
     @Override
@@ -38,6 +54,9 @@ public class ClpPlanOptimizerProvider
     @Override
     public Set<ConnectorPlanOptimizer> getPhysicalPlanOptimizers()
     {
-        return ImmutableSet.of(new ClpPlanOptimizer());
+        return ImmutableSet.of(new ClpPlanOptimizer(functionManager,
+                functionResolution,
+                determinismEvaluator,
+                expressionOptimizer));
     }
 }

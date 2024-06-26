@@ -15,17 +15,22 @@ package com.yscope.presto;
 
 import com.facebook.airlift.log.Logger;
 import com.facebook.presto.common.type.VarcharType;
+import com.facebook.presto.expressions.LogicalRowExpressions;
 import com.facebook.presto.spi.ConnectorPlanOptimizer;
 import com.facebook.presto.spi.ConnectorPlanRewriter;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.TableHandle;
 import com.facebook.presto.spi.VariableAllocator;
+import com.facebook.presto.spi.function.FunctionMetadataManager;
+import com.facebook.presto.spi.function.StandardFunctionResolution;
 import com.facebook.presto.spi.plan.FilterNode;
 import com.facebook.presto.spi.plan.PlanNode;
 import com.facebook.presto.spi.plan.PlanNodeIdAllocator;
 import com.facebook.presto.spi.plan.TableScanNode;
 import com.facebook.presto.spi.relation.CallExpression;
 import com.facebook.presto.spi.relation.ConstantExpression;
+import com.facebook.presto.spi.relation.DeterminismEvaluator;
+import com.facebook.presto.spi.relation.ExpressionOptimizer;
 import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.relation.SpecialFormExpression;
 import io.airlift.slice.Slice;
@@ -33,11 +38,26 @@ import io.airlift.slice.Slice;
 import java.util.Optional;
 
 import static com.facebook.presto.spi.ConnectorPlanRewriter.rewriteWith;
+import static com.facebook.presto.spi.relation.ExpressionOptimizer.Level.OPTIMIZED;
 
 public class ClpPlanOptimizer
         implements ConnectorPlanOptimizer
 {
     private static final Logger log = Logger.get(ClpPlanOptimizer.class);
+    private final LogicalRowExpressions logicalRowExpressions;
+    private final ExpressionOptimizer expressionOptimizer;
+
+    public ClpPlanOptimizer(FunctionMetadataManager functionManager,
+                            StandardFunctionResolution functionResolution,
+                            DeterminismEvaluator determinismEvaluator,
+                            ExpressionOptimizer expressionOptimizer)
+    {
+        this.logicalRowExpressions = new LogicalRowExpressions(
+                determinismEvaluator,
+                functionResolution,
+                functionManager);
+        this.expressionOptimizer = expressionOptimizer;
+    }
 
     private static String getVariableName(String variableName)
     {
@@ -79,13 +99,11 @@ public class ClpPlanOptimizer
                 return queryBuilder.substring(0, queryBuilder.length() - 4) + ")";
             }
             else if (specialFormExpression.getForm() == SpecialFormExpression.Form.IN) {
-                CallExpression callExpression = (CallExpression) specialFormExpression.getArguments().get(1);
                 String variableName = getVariableName(specialFormExpression.getArguments().get(0).toString());
                 StringBuilder queryBuilder = new StringBuilder();
-                queryBuilder.append(variableName);
                 queryBuilder.append("(");
-                for (RowExpression argument : callExpression.getArguments()
-                        .subList(1, callExpression.getArguments().size())) {
+                for (RowExpression argument : specialFormExpression.getArguments()
+                        .subList(1, specialFormExpression.getArguments().size())) {
                     ConstantExpression literal = (ConstantExpression) argument;
                     String literalString = getLiteralString(literal);
                     queryBuilder.append(variableName).append(": ");
@@ -141,16 +159,18 @@ public class ClpPlanOptimizer
                              VariableAllocator variableAllocator,
                              PlanNodeIdAllocator idAllocator)
     {
-        return rewriteWith(new Rewriter(idAllocator), maxSubplan);
+        return rewriteWith(new Rewriter(session, idAllocator), maxSubplan);
     }
 
-    private static class Rewriter
+    private class Rewriter
             extends ConnectorPlanRewriter<Void>
     {
+        private final ConnectorSession session;
         private final PlanNodeIdAllocator idAllocator;
 
-        public Rewriter(PlanNodeIdAllocator idAllocator)
+        public Rewriter(ConnectorSession session, PlanNodeIdAllocator idAllocator)
         {
+            this.session = session;
             this.idAllocator = idAllocator;
         }
 
@@ -164,7 +184,9 @@ public class ClpPlanOptimizer
             TableScanNode tableScanNode = (TableScanNode) node.getSource();
             TableHandle tableHandle = tableScanNode.getTable();
             ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle.getConnectorHandle();
-            String query = buildKqlQuery(node.getPredicate());
+            RowExpression predicate = expressionOptimizer.optimize(node.getPredicate(), OPTIMIZED, session);
+            predicate = logicalRowExpressions.convertToConjunctiveNormalForm(predicate);
+            String query = buildKqlQuery(predicate);
             log.info("Query: " + query);
             ClpTableLayoutHandle clpTableLayoutHandle = new ClpTableLayoutHandle(clpTableHandle, Optional.of(query));
             return new TableScanNode(
