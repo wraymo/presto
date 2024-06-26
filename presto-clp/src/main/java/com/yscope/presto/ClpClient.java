@@ -279,33 +279,39 @@ public class ClpClient
         }
         else if (additionalPredicate instanceof CallExpression) {
             CallExpression callExpression = (CallExpression) additionalPredicate;
+            String variableName = callExpression.getArguments().get(0).toString();
+            if (variableName.endsWith("_bigint") || variableName.endsWith("_double") ||
+                    variableName.endsWith("_varchar") || variableName.endsWith("_boolean")) {
+                variableName = variableName.substring(0, variableName.lastIndexOf('_'));
+            }
+            String literal = callExpression.getArguments().get(1).toString();
             switch (callExpression.getDisplayName()) {
                 case "EQUAL":
-                    return callExpression.getArguments().get(0).toString() + ": \"" + callExpression.getArguments()
-                            .get(1)
-                            .toString() + "\"";
+                    if (callExpression.getArguments().get(1).getType().equals(BigintType.BIGINT) ||
+                            callExpression.getArguments().get(1).getType().equals(DoubleType.DOUBLE) ||
+                            callExpression.getArguments().get(1).getType().equals(BooleanType.BOOLEAN)) {
+                        return variableName + ": " + literal;
+                    }
+                    else {
+                        return variableName + ": \"" + literal + "\"";
+                    }
                 case "<>":
-                    return "NOT " + callExpression.getArguments()
-                            .get(0)
-                            .toString() + ": \"" + callExpression.getArguments()
-                            .get(1)
-                            .toString() + "\"";
+                    if (callExpression.getArguments().get(1).getType().equals(BigintType.BIGINT) ||
+                            callExpression.getArguments().get(1).getType().equals(DoubleType.DOUBLE) ||
+                            callExpression.getArguments().get(1).getType().equals(BooleanType.BOOLEAN)) {
+                        return "NOT " + variableName + ": " + literal;
+                    }
+                    else {
+                        return "NOT " + variableName + ": \"" + literal + "\"";
+                    }
                 case "GREATER_THAN":
-                    return callExpression.getArguments().get(0).toString() + " > " + callExpression.getArguments()
-                            .get(1)
-                            .toString();
+                    return variableName + " > " + literal;
                 case "GREATER_THAN_OR_EQUAL":
-                    return callExpression.getArguments().get(0).toString() + " >= " + callExpression.getArguments()
-                            .get(1)
-                            .toString();
+                    return variableName + " >= " + literal;
                 case "LESS_THAN":
-                    return callExpression.getArguments().get(0).toString() + " < " + callExpression.getArguments()
-                            .get(1)
-                            .toString();
+                    return variableName + " < " + literal;
                 case "LESS_THAN_OR_EQUAL":
-                    return callExpression.getArguments().get(0).toString() + " <= " + callExpression.getArguments()
-                            .get(1)
-                            .toString();
+                    return variableName + " <= " + literal;
             }
         }
         throw new RuntimeException("Unsupported predicate type");
