@@ -13,9 +13,11 @@
  */
 package com.yscope.presto;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.common.type.BigintType;
 import com.facebook.presto.common.type.BooleanType;
 import com.facebook.presto.common.type.DoubleType;
+import com.facebook.presto.common.type.VarcharType;
 import com.facebook.presto.spi.ConnectorPlanOptimizer;
 import com.facebook.presto.spi.ConnectorPlanRewriter;
 import com.facebook.presto.spi.ConnectorSession;
@@ -26,8 +28,10 @@ import com.facebook.presto.spi.plan.PlanNode;
 import com.facebook.presto.spi.plan.PlanNodeIdAllocator;
 import com.facebook.presto.spi.plan.TableScanNode;
 import com.facebook.presto.spi.relation.CallExpression;
+import com.facebook.presto.spi.relation.ConstantExpression;
 import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.relation.SpecialFormExpression;
+import io.airlift.slice.Slice;
 
 import java.util.Optional;
 
@@ -36,6 +40,25 @@ import static com.facebook.presto.spi.ConnectorPlanRewriter.rewriteWith;
 public class ClpPlanOptimizer
         implements ConnectorPlanOptimizer
 {
+    private static final Logger log = Logger.get(ClpPlanOptimizer.class);
+
+    private static String getVariableName(String variableName)
+    {
+        if (variableName.endsWith("_bigint") || variableName.endsWith("_double") ||
+                variableName.endsWith("_varchar") || variableName.endsWith("_boolean")) {
+            return variableName.substring(0, variableName.lastIndexOf('_'));
+        }
+        return variableName;
+    }
+
+    private static String getLiteralString(ConstantExpression literal)
+    {
+        if (literal.getValue() instanceof Slice) {
+            return ((Slice) literal.getValue()).toStringUtf8();
+        }
+        return literal.toString();
+    }
+
     public static String buildKqlQuery(RowExpression additionalPredicate)
     {
         if (additionalPredicate instanceof SpecialFormExpression) {
@@ -58,42 +81,58 @@ public class ClpPlanOptimizer
                 }
                 return queryBuilder.substring(0, queryBuilder.length() - 4) + ")";
             }
+            else if (specialFormExpression.getForm() == SpecialFormExpression.Form.IN) {
+                CallExpression callExpression = (CallExpression) specialFormExpression.getArguments().get(1);
+                String variableName = getVariableName(specialFormExpression.getArguments().get(0).toString());
+                StringBuilder queryBuilder = new StringBuilder();
+                queryBuilder.append(variableName);
+                queryBuilder.append("(");
+                for (RowExpression argument : callExpression.getArguments()
+                        .subList(1, callExpression.getArguments().size())) {
+                    ConstantExpression literal = (ConstantExpression) argument;
+                    String literalString = getLiteralString(literal);
+                    queryBuilder.append(variableName).append(": ");
+                    if (literal.getType().equals(VarcharType.VARCHAR)) {
+                        queryBuilder.append("\"");
+                        queryBuilder.append(literalString);
+                        queryBuilder.append("\"");
+                    }
+                    else {
+                        queryBuilder.append(literalString);
+                    }
+                    queryBuilder.append(" OR ");
+                }
+                return queryBuilder.substring(0, queryBuilder.length() - 4) + ")";
+            }
         }
         else if (additionalPredicate instanceof CallExpression) {
             CallExpression callExpression = (CallExpression) additionalPredicate;
-            String variableName = callExpression.getArguments().get(0).toString();
-            if (variableName.endsWith("_bigint") || variableName.endsWith("_double") ||
-                    variableName.endsWith("_varchar") || variableName.endsWith("_boolean")) {
-                variableName = variableName.substring(0, variableName.lastIndexOf('_'));
-            }
-            String literal = callExpression.getArguments().get(1).toString();
+            String variableName = getVariableName(callExpression.getArguments().get(0).toString());
+            ConstantExpression literal = (ConstantExpression) callExpression.getArguments().get(1);
+            String literalString = getLiteralString(literal);
             switch (callExpression.getDisplayName()) {
                 case "EQUAL":
-                    if (callExpression.getArguments().get(1).getType().equals(BigintType.BIGINT) ||
-                            callExpression.getArguments().get(1).getType().equals(DoubleType.DOUBLE) ||
-                            callExpression.getArguments().get(1).getType().equals(BooleanType.BOOLEAN)) {
-                        return variableName + ": " + literal;
+                    if (literal.getType().equals(VarcharType.VARCHAR)) {
+                        return variableName + ": \"" + literalString + "\"";
                     }
                     else {
-                        return variableName + ": \"" + literal + "\"";
+                        return variableName + ": " + literalString;
                     }
                 case "<>":
-                    if (callExpression.getArguments().get(1).getType().equals(BigintType.BIGINT) ||
-                            callExpression.getArguments().get(1).getType().equals(DoubleType.DOUBLE) ||
-                            callExpression.getArguments().get(1).getType().equals(BooleanType.BOOLEAN)) {
-                        return "NOT " + variableName + ": " + literal;
+                    if (literal.getType().equals(VarcharType.VARCHAR)) {
+                        return "NOT " + variableName + ": \"" + literalString + "\"";
                     }
                     else {
-                        return "NOT " + variableName + ": \"" + literal + "\"";
+                        return "NOT " + variableName + ": " + literalString;
                     }
                 case "GREATER_THAN":
-                    return variableName + " > " + literal;
+                    return variableName + " > " + literalString;
                 case "GREATER_THAN_OR_EQUAL":
-                    return variableName + " >= " + literal;
+                    return variableName + " >= " + literalString;
                 case "LESS_THAN":
-                    return variableName + " < " + literal;
+                    return variableName + " < " + literalString;
                 case "LESS_THAN_OR_EQUAL":
-                    return variableName + " <= " + literal;
+                    return variableName + " <= " + literalString;
             }
         }
         throw new RuntimeException("Unsupported predicate type");
@@ -128,7 +167,9 @@ public class ClpPlanOptimizer
             TableScanNode tableScanNode = (TableScanNode) node.getSource();
             TableHandle tableHandle = tableScanNode.getTable();
             ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle.getConnectorHandle();
-            ClpTableLayoutHandle clpTableLayoutHandle = new ClpTableLayoutHandle(clpTableHandle, Optional.of(buildKqlQuery(node.getPredicate())));
+            String query = buildKqlQuery(node.getPredicate());
+            log.info("Query: " + query);
+            ClpTableLayoutHandle clpTableLayoutHandle = new ClpTableLayoutHandle(clpTableHandle, Optional.of(query));
             return new TableScanNode(
                     node.getSourceLocation(),
                     idAllocator.getNextId(),

@@ -32,7 +32,7 @@ import static java.util.Objects.requireNonNull;
 
 public class VariableAllocator
 {
-    protected static final Pattern DISALLOWED_CHAR_PATTERN = Pattern.compile("[^a-zA-Z0-9_\\-$]+");
+    protected static final Pattern DISALLOWED_CHAR_PATTERN = Pattern.compile("[^.a-zA-Z0-9_\\-$]+");
 
     protected final Map<String, Type> variables;
     protected int nextId;
