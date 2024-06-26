@@ -19,9 +19,6 @@ import com.facebook.presto.common.type.BooleanType;
 import com.facebook.presto.common.type.DoubleType;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.common.type.VarcharType;
-import com.facebook.presto.spi.relation.CallExpression;
-import com.facebook.presto.spi.relation.RowExpression;
-import com.facebook.presto.spi.relation.SpecialFormExpression;
 import com.github.luben.zstd.ZstdInputStream;
 import com.google.common.collect.ImmutableSet;
 import com.yscope.presto.schema.SchemaNode;
@@ -226,14 +223,14 @@ public class ClpClient
         return polymorphicColumnHandles;
     }
 
-    public BufferedReader getRecords(String tableName, Optional<RowExpression> additionalPredicate)
+    public BufferedReader getRecords(String tableName, Optional<String> query)
     {
         if (!listTables().contains(tableName)) {
             return null;
         }
 
-        if (additionalPredicate.isPresent()) {
-            return searchTable(tableName, additionalPredicate.get());
+        if (query.isPresent()) {
+            return searchTable(tableName, query.get());
         }
         else {
             Path decompressFile = decompressDir.resolve(tableName).resolve("original");
@@ -254,75 +251,9 @@ public class ClpClient
         }
     }
 
-    private String buildKqlQuery(RowExpression additionalPredicate)
-    {
-        if (additionalPredicate instanceof SpecialFormExpression) {
-            SpecialFormExpression specialFormExpression = (SpecialFormExpression) additionalPredicate;
-            if (specialFormExpression.getForm() == SpecialFormExpression.Form.AND) {
-                StringBuilder queryBuilder = new StringBuilder();
-                queryBuilder.append("(");
-                for (RowExpression argument : specialFormExpression.getArguments()) {
-                    queryBuilder.append(buildKqlQuery(argument));
-                    queryBuilder.append(" AND ");
-                }
-                return queryBuilder.substring(0, queryBuilder.length() - 5) + ")";
-            }
-            else if (specialFormExpression.getForm() == SpecialFormExpression.Form.OR) {
-                StringBuilder queryBuilder = new StringBuilder();
-                queryBuilder.append("(");
-                for (RowExpression argument : specialFormExpression.getArguments()) {
-                    queryBuilder.append(buildKqlQuery(argument));
-                    queryBuilder.append(" OR ");
-                }
-                return queryBuilder.substring(0, queryBuilder.length() - 4) + ")";
-            }
-        }
-        else if (additionalPredicate instanceof CallExpression) {
-            CallExpression callExpression = (CallExpression) additionalPredicate;
-            String variableName = callExpression.getArguments().get(0).toString();
-            if (variableName.endsWith("_bigint") || variableName.endsWith("_double") ||
-                    variableName.endsWith("_varchar") || variableName.endsWith("_boolean")) {
-                variableName = variableName.substring(0, variableName.lastIndexOf('_'));
-            }
-            String literal = callExpression.getArguments().get(1).toString();
-            switch (callExpression.getDisplayName()) {
-                case "EQUAL":
-                    if (callExpression.getArguments().get(1).getType().equals(BigintType.BIGINT) ||
-                            callExpression.getArguments().get(1).getType().equals(DoubleType.DOUBLE) ||
-                            callExpression.getArguments().get(1).getType().equals(BooleanType.BOOLEAN)) {
-                        return variableName + ": " + literal;
-                    }
-                    else {
-                        return variableName + ": \"" + literal + "\"";
-                    }
-                case "<>":
-                    if (callExpression.getArguments().get(1).getType().equals(BigintType.BIGINT) ||
-                            callExpression.getArguments().get(1).getType().equals(DoubleType.DOUBLE) ||
-                            callExpression.getArguments().get(1).getType().equals(BooleanType.BOOLEAN)) {
-                        return "NOT " + variableName + ": " + literal;
-                    }
-                    else {
-                        return "NOT " + variableName + ": \"" + literal + "\"";
-                    }
-                case "GREATER_THAN":
-                    return variableName + " > " + literal;
-                case "GREATER_THAN_OR_EQUAL":
-                    return variableName + " >= " + literal;
-                case "LESS_THAN":
-                    return variableName + " < " + literal;
-                case "LESS_THAN_OR_EQUAL":
-                    return variableName + " <= " + literal;
-            }
-        }
-        throw new RuntimeException("Unsupported predicate type");
-    }
-
-    private BufferedReader searchTable(String tableName, RowExpression additionalPredicate)
+    private BufferedReader searchTable(String tableName, String query)
     {
         Path tableArchiveDir = Paths.get(config.getClpArchiveDir(), tableName);
-        String query = buildKqlQuery(additionalPredicate);
-
-        // Spawn search process and read from stdout
         try {
             ProcessBuilder processBuilder =
                     new ProcessBuilder(executablePath.toString(),

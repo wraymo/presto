@@ -50,7 +50,7 @@ public class ClpSplitManager
         }
         List<ConnectorSplit> splits = Collections.singletonList(new ClpSplit("default",
                 tableHandle.getTableName(),
-                tableHandle.getPredicate()));
+                tableHandle.getQuery()));
 
         return new FixedSplitSource(splits);
     }

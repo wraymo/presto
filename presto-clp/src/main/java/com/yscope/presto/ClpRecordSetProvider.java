@@ -47,7 +47,7 @@ public class ClpRecordSetProvider
         for (ColumnHandle handle : columns) {
             handles.add((ClpColumnHandle) handle);
         }
-        return new ClpRecordSet(clpClient.getRecords(clpSplit.getTableName(), clpSplit.getAdditionalPredicate()),
+        return new ClpRecordSet(clpClient.getRecords(clpSplit.getTableName(), clpSplit.getQuery()),
                 clpClient.getConfig().isPolymorphicTypeEnabled(),
                 handles.build());
     }

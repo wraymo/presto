@@ -127,12 +127,12 @@ public class TestClpRecordCursor
                                         "a_bigint",
                                         BigintType.BIGINT),
                                 constant(1L, BigintType.BIGINT)));
-
+        String query = ClpPlanOptimizer.buildKqlQuery(callExpression);
         ClpRecordSetProvider recordSetProvider = new ClpRecordSetProvider(clpClient);
         ClpRecordSet recordSet = (ClpRecordSet) recordSetProvider.getRecordSet(
                 ClpTransactionHandle.INSTANCE,
                 SESSION,
-                new ClpSplit("default", "test_1_table", Optional.of(callExpression)),
+                new ClpSplit("default", "test_1_table", Optional.of(query)),
                 new ArrayList<>(clpClient.listColumns("test_1_table")));
         assertNotNull(recordSet, "recordSet is null");
         ClpRecordCursor cursor = (ClpRecordCursor) recordSet.cursor();

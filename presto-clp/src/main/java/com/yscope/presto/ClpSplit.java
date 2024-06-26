@@ -34,16 +34,16 @@ public class ClpSplit
 {
     private final String schemaName;
     private final String tableName;
-    private final Optional<RowExpression> additionalPredicate;
+    private final Optional<String> query;
 
     @JsonCreator
     public ClpSplit(@JsonProperty("schemaName") @Nullable String schemaName,
                     @JsonProperty("tableName") @Nullable String tableName,
-                    @JsonProperty("additionalPredicate") Optional<RowExpression> additionalPredicate)
+                    @JsonProperty("query") Optional<String> query)
     {
         this.schemaName = schemaName;
         this.tableName = tableName;
-        this.additionalPredicate = additionalPredicate;
+        this.query = query;
     }
 
     @JsonProperty
@@ -60,9 +60,9 @@ public class ClpSplit
     }
 
     @JsonProperty
-    public Optional<RowExpression> getAdditionalPredicate()
+    public Optional<String> getQuery()
     {
-        return additionalPredicate;
+        return query;
     }
 
     @Override

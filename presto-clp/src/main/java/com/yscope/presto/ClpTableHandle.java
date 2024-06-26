@@ -25,20 +25,20 @@ public class ClpTableHandle
         implements ConnectorTableHandle
 {
     private final String tableName;
-    private final Optional<RowExpression> predicate;
+    private final Optional<String> query;
 
     @JsonCreator
     public ClpTableHandle(@JsonProperty("tableName") String tableName,
-                          @JsonProperty("predicate") Optional<RowExpression> predicate)
+                          @JsonProperty("query") Optional<String> query)
     {
         this.tableName = tableName;
-        this.predicate = predicate;
+        this.query = query;
     }
 
     @JsonProperty
-    public Optional<RowExpression> getPredicate()
+    public Optional<String> getQuery()
     {
-        return predicate;
+        return query;
     }
 
     @JsonProperty
