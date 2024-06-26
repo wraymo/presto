@@ -14,20 +14,37 @@
 package com.yscope.presto;
 
 import com.facebook.presto.spi.ConnectorTableHandle;
+import com.facebook.presto.spi.relation.RowExpression;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Objects;
+import java.util.Optional;
 
 public class ClpTableHandle
         implements ConnectorTableHandle
 {
     private final String tableName;
+    private final Optional<RowExpression> predicate;
+
+    @JsonCreator
+    public ClpTableHandle(@JsonProperty("tableName") String tableName,
+                          @JsonProperty("predicate") Optional<RowExpression> predicate)
+    {
+        this.tableName = tableName;
+        this.predicate = predicate;
+    }
 
     @JsonCreator
     public ClpTableHandle(@JsonProperty("tableName") String tableName)
     {
-        this.tableName = tableName;
+        this(tableName, Optional.empty());
+    }
+
+    @JsonProperty
+    public Optional<RowExpression> getPredicate()
+    {
+        return predicate;
     }
 
     @JsonProperty

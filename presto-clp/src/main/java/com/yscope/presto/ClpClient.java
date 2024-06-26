@@ -19,6 +19,9 @@ import com.facebook.presto.common.type.BooleanType;
 import com.facebook.presto.common.type.DoubleType;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.common.type.VarcharType;
+import com.facebook.presto.spi.relation.CallExpression;
+import com.facebook.presto.spi.relation.RowExpression;
+import com.facebook.presto.spi.relation.SpecialFormExpression;
 import com.github.luben.zstd.ZstdInputStream;
 import com.google.common.collect.ImmutableSet;
 import com.yscope.presto.schema.SchemaNode;
@@ -32,6 +35,7 @@ import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -47,6 +51,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static java.util.Objects.requireNonNull;
@@ -221,30 +226,113 @@ public class ClpClient
         return polymorphicColumnHandles;
     }
 
-    public BufferedReader getRecords(String tableName)
+    public BufferedReader getRecords(String tableName, Optional<RowExpression> additionalPredicate)
     {
         if (!listTables().contains(tableName)) {
             return null;
         }
 
-        Path decompressFile = decompressDir.resolve(tableName).resolve("original");
-        if (!Files.exists(decompressFile) || !Files.isRegularFile(decompressFile)) {
-            if (!DecompressRecords(tableName)) {
+        if (additionalPredicate.isPresent()) {
+            return searchTable(tableName, additionalPredicate.get());
+        }
+        else {
+            Path decompressFile = decompressDir.resolve(tableName).resolve("original");
+            if (!Files.exists(decompressFile) || !Files.isRegularFile(decompressFile)) {
+                if (!decompressRecords(tableName)) {
+                    return null;
+                }
+                log.info("Decompress records to %s", decompressFile.toString());
+            }
+
+            try {
+                return Files.newBufferedReader(decompressFile);
+            }
+            catch (IOException e) {
+                log.error(e, "Failed to get records for table %s", tableName);
                 return null;
             }
-            log.info("Decompress records to %s", decompressFile.toString());
         }
+    }
 
+    private String buildKqlQuery(RowExpression additionalPredicate)
+    {
+        if (additionalPredicate instanceof SpecialFormExpression) {
+            SpecialFormExpression specialFormExpression = (SpecialFormExpression) additionalPredicate;
+            if (specialFormExpression.getForm() == SpecialFormExpression.Form.AND) {
+                StringBuilder queryBuilder = new StringBuilder();
+                queryBuilder.append("(");
+                for (RowExpression argument : specialFormExpression.getArguments()) {
+                    queryBuilder.append(buildKqlQuery(argument));
+                    queryBuilder.append(" AND ");
+                }
+                return queryBuilder.substring(0, queryBuilder.length() - 5) + ")";
+            }
+            else if (specialFormExpression.getForm() == SpecialFormExpression.Form.OR) {
+                StringBuilder queryBuilder = new StringBuilder();
+                queryBuilder.append("(");
+                for (RowExpression argument : specialFormExpression.getArguments()) {
+                    queryBuilder.append(buildKqlQuery(argument));
+                    queryBuilder.append(" OR ");
+                }
+                return queryBuilder.substring(0, queryBuilder.length() - 4) + ")";
+            }
+        }
+        else if (additionalPredicate instanceof CallExpression) {
+            CallExpression callExpression = (CallExpression) additionalPredicate;
+            switch (callExpression.getDisplayName()) {
+                case "EQUAL":
+                    return callExpression.getArguments().get(0).toString() + ": \"" + callExpression.getArguments()
+                            .get(1)
+                            .toString() + "\"";
+                case "<>":
+                    return "NOT " + callExpression.getArguments()
+                            .get(0)
+                            .toString() + ": \"" + callExpression.getArguments()
+                            .get(1)
+                            .toString() + "\"";
+                case "GREATER_THAN":
+                    return callExpression.getArguments().get(0).toString() + " > " + callExpression.getArguments()
+                            .get(1)
+                            .toString();
+                case "GREATER_THAN_OR_EQUAL":
+                    return callExpression.getArguments().get(0).toString() + " >= " + callExpression.getArguments()
+                            .get(1)
+                            .toString();
+                case "LESS_THAN":
+                    return callExpression.getArguments().get(0).toString() + " < " + callExpression.getArguments()
+                            .get(1)
+                            .toString();
+                case "LESS_THAN_OR_EQUAL":
+                    return callExpression.getArguments().get(0).toString() + " <= " + callExpression.getArguments()
+                            .get(1)
+                            .toString();
+            }
+        }
+        throw new RuntimeException("Unsupported predicate type");
+    }
+
+    private BufferedReader searchTable(String tableName, RowExpression additionalPredicate)
+    {
+        Path tableArchiveDir = Paths.get(config.getClpArchiveDir(), tableName);
+        String query = buildKqlQuery(additionalPredicate);
+
+        // Spawn search process and read from stdout
         try {
-            return Files.newBufferedReader(decompressFile);
+            ProcessBuilder processBuilder =
+                    new ProcessBuilder(executablePath.toString(),
+                            "s",
+                            tableArchiveDir.toString(),
+                            query);
+            Process process = processBuilder.start();
+            return new BufferedReader(new InputStreamReader(process.getInputStream()));
         }
         catch (IOException e) {
-            log.error(e, "Failed to get records for table %s", tableName);
+            log.error(e, "Failed to search records for table %s", tableName);
             return null;
         }
     }
 
-    private boolean DecompressRecords(String tableName)
+    private boolean decompressRecords(String tableName)
     {
         Path tableDecompressDir = decompressDir.resolve(tableName);
         Path tableArchiveDir = Paths.get(config.getClpArchiveDir(), tableName);

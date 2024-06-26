@@ -16,6 +16,7 @@ package com.yscope.presto;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.HostAddress;
 import com.facebook.presto.spi.NodeProvider;
+import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.schedule.NodeSelectionStrategy;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -24,6 +25,7 @@ import com.google.common.collect.ImmutableList;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Optional;
 
 import static com.facebook.presto.spi.schedule.NodeSelectionStrategy.NO_PREFERENCE;
 
@@ -32,13 +34,16 @@ public class ClpSplit
 {
     private final String schemaName;
     private final String tableName;
+    private final Optional<RowExpression> additionalPredicate;
 
     @JsonCreator
     public ClpSplit(@JsonProperty("schemaName") @Nullable String schemaName,
-                    @JsonProperty("tableName") @Nullable String tableName)
+                    @JsonProperty("tableName") @Nullable String tableName,
+                    @JsonProperty("additionalPredicate") Optional<RowExpression> additionalPredicate)
     {
         this.schemaName = schemaName;
         this.tableName = tableName;
+        this.additionalPredicate = additionalPredicate;
     }
 
     @JsonProperty
@@ -52,6 +57,12 @@ public class ClpSplit
     public String getTableName()
     {
         return tableName;
+    }
+
+    @JsonProperty
+    public Optional<RowExpression> getAdditionalPredicate()
+    {
+        return additionalPredicate;
     }
 
     @Override
