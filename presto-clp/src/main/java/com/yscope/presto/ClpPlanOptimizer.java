@@ -14,9 +14,6 @@
 package com.yscope.presto;
 
 import com.facebook.airlift.log.Logger;
-import com.facebook.presto.common.type.BigintType;
-import com.facebook.presto.common.type.BooleanType;
-import com.facebook.presto.common.type.DoubleType;
 import com.facebook.presto.common.type.VarcharType;
 import com.facebook.presto.spi.ConnectorPlanOptimizer;
 import com.facebook.presto.spi.ConnectorPlanRewriter;
