@@ -258,6 +258,7 @@ public class ClpPlanOptimizer
                 return node;
             }
 
+            long startTs = System.currentTimeMillis();
             TableScanNode tableScanNode = (TableScanNode) node.getSource();
             TableHandle tableHandle = tableScanNode.getTable();
             ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle.getConnectorHandle();
@@ -267,6 +268,8 @@ public class ClpPlanOptimizer
             String query = buildKqlQuery(node.getPredicate());
             log.info("Query: " + query);
             ClpTableLayoutHandle clpTableLayoutHandle = new ClpTableLayoutHandle(clpTableHandle, Optional.of(query));
+            long endTs = System.currentTimeMillis();
+            log.info("Time taken to optimize: " + (endTs - startTs) + "ms");
             return new TableScanNode(
                     node.getSourceLocation(),
                     idAllocator.getNextId(),
