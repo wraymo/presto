@@ -13,9 +13,9 @@
  */
 package com.yscope.presto;
 
+import com.facebook.presto.common.type.BigintType;
 import com.facebook.presto.common.type.BooleanType;
 import com.facebook.presto.common.type.DoubleType;
-import com.facebook.presto.common.type.IntegerType;
 import com.facebook.presto.common.type.VarcharType;
 import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.ConnectorTableMetadata;
@@ -67,8 +67,8 @@ public class TestClpMetadata
         ConnectorTableMetadata tableMetadata = metadata.getTableMetadata(SESSION, clpTableHandle);
         HashSet<ColumnMetadata> columnMetadata = new HashSet<>();
         columnMetadata.add(ColumnMetadata.builder()
-                .setName("a_integer")
-                .setType(IntegerType.INTEGER)
+                .setName("a_bigint")
+                .setType(BigintType.BIGINT)
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
@@ -109,7 +109,7 @@ public class TestClpMetadata
         HashSet<ColumnMetadata> columnMetadata = new HashSet<>();
         columnMetadata.add(ColumnMetadata.builder()
                 .setName("id")
-                .setType(IntegerType.INTEGER)
+                .setType(BigintType.BIGINT)
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
@@ -119,7 +119,7 @@ public class TestClpMetadata
                 .build());
         columnMetadata.add(ColumnMetadata.builder()
                 .setName("age")
-                .setType(IntegerType.INTEGER)
+                .setType(BigintType.BIGINT)
                 .setNullable(true)
                 .build());
         columnMetadata.add(ColumnMetadata.builder()

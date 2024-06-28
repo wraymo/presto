@@ -32,6 +32,7 @@ import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -47,6 +48,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static java.util.Objects.requireNonNull;
@@ -221,29 +223,53 @@ public class ClpClient
         return polymorphicColumnHandles;
     }
 
-    public BufferedReader getRecords(String tableName)
+    public BufferedReader getRecords(String tableName, Optional<String> query)
     {
         if (!listTables().contains(tableName)) {
             return null;
         }
 
-        Path decompressFile = decompressDir.resolve(tableName).resolve("original");
-        if (!Files.exists(decompressFile) || !Files.isRegularFile(decompressFile)) {
-            if (!DecompressRecords(tableName)) {
+        if (query.isPresent()) {
+            return searchTable(tableName, query.get());
+        }
+        else {
+            Path decompressFile = decompressDir.resolve(tableName).resolve("original");
+            if (!Files.exists(decompressFile) || !Files.isRegularFile(decompressFile)) {
+                if (!decompressRecords(tableName)) {
+                    return null;
+                }
+                log.info("Decompress records to %s", decompressFile.toString());
+            }
+
+            try {
+                return Files.newBufferedReader(decompressFile);
+            }
+            catch (IOException e) {
+                log.error(e, "Failed to get records for table %s", tableName);
                 return null;
             }
         }
+    }
 
+    private BufferedReader searchTable(String tableName, String query)
+    {
+        Path tableArchiveDir = Paths.get(config.getClpArchiveDir(), tableName);
         try {
-            return Files.newBufferedReader(decompressFile);
+            ProcessBuilder processBuilder =
+                    new ProcessBuilder(executablePath.toString(),
+                            "s",
+                            tableArchiveDir.toString(),
+                            query);
+            Process process = processBuilder.start();
+            return new BufferedReader(new InputStreamReader(process.getInputStream()));
         }
         catch (IOException e) {
-            log.error(e, "Failed to get records for table %s", tableName);
+            log.error(e, "Failed to search records for table %s", tableName);
             return null;
         }
     }
 
-    private boolean DecompressRecords(String tableName)
+    private boolean decompressRecords(String tableName)
     {
         long startTime = System.currentTimeMillis();
         Path tableDecompressDir = decompressDir.resolve(tableName);

@@ -24,6 +24,7 @@ import com.google.common.collect.ImmutableList;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Optional;
 
 import static com.facebook.presto.spi.schedule.NodeSelectionStrategy.NO_PREFERENCE;
 
@@ -32,13 +33,16 @@ public class ClpSplit
 {
     private final String schemaName;
     private final String tableName;
+    private final Optional<String> query;
 
     @JsonCreator
     public ClpSplit(@JsonProperty("schemaName") @Nullable String schemaName,
-                    @JsonProperty("tableName") @Nullable String tableName)
+                    @JsonProperty("tableName") @Nullable String tableName,
+                    @JsonProperty("query") Optional<String> query)
     {
         this.schemaName = schemaName;
         this.tableName = tableName;
+        this.query = query;
     }
 
     @JsonProperty
@@ -52,6 +56,12 @@ public class ClpSplit
     public String getTableName()
     {
         return tableName;
+    }
+
+    @JsonProperty
+    public Optional<String> getQuery()
+    {
+        return query;
     }
 
     @Override

@@ -18,22 +18,32 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Objects;
+import java.util.Optional;
 
 public class ClpTableLayoutHandle
         implements ConnectorTableLayoutHandle
 {
     private final ClpTableHandle table;
+    private final Optional<String> query;
 
     @JsonCreator
-    public ClpTableLayoutHandle(@JsonProperty("table") ClpTableHandle table)
+    public ClpTableLayoutHandle(@JsonProperty("table") ClpTableHandle table,
+                                @JsonProperty("query") Optional<String> query)
     {
         this.table = table;
+        this.query = query;
     }
 
     @JsonProperty
     public ClpTableHandle getTable()
     {
         return table;
+    }
+
+    @JsonProperty
+    public Optional<String> getQuery()
+    {
+        return query;
     }
 
     @Override

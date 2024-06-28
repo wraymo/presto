@@ -13,13 +13,24 @@
  */
 package com.yscope.presto;
 
+import com.facebook.presto.common.type.BigintType;
+import com.facebook.presto.metadata.FunctionAndTypeManager;
+import com.facebook.presto.spi.relation.CallExpression;
+import com.facebook.presto.spi.relation.VariableReferenceExpression;
+import com.google.common.collect.ImmutableList;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
+import static com.facebook.presto.common.function.OperatorType.EQUAL;
+import static com.facebook.presto.common.type.BooleanType.BOOLEAN;
+import static com.facebook.presto.metadata.FunctionAndTypeManager.createTestFunctionAndTypeManager;
+import static com.facebook.presto.sql.analyzer.TypeSignatureProvider.fromTypes;
+import static com.facebook.presto.sql.relational.Expressions.constant;
 import static com.facebook.presto.testing.TestingConnectorSession.SESSION;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
@@ -55,7 +66,7 @@ public class TestClpRecordCursor
         ClpRecordSet recordSet = (ClpRecordSet) recordSetProvider.getRecordSet(
                 ClpTransactionHandle.INSTANCE,
                 SESSION,
-                new ClpSplit("default", "test_1_table"),
+                new ClpSplit("default", "test_1_table", Optional.empty()),
                 new ArrayList<>(clpClient.listColumns("test_1_table")));
         assertNotNull(recordSet, "recordSet is null");
         ClpRecordCursor cursor = (ClpRecordCursor) recordSet.cursor();
@@ -91,7 +102,7 @@ public class TestClpRecordCursor
         ClpRecordSet recordSet = (ClpRecordSet) recordSetProvider.getRecordSet(
                 ClpTransactionHandle.INSTANCE,
                 SESSION,
-                new ClpSplit("default", "test_2_table"),
+                new ClpSplit("default", "test_2_table", Optional.empty()),
                 new ArrayList<>(clpClient.listColumns("test_2_table")));
         assertNotNull(recordSet, "recordSet is null");
         ClpRecordCursor cursor = (ClpRecordCursor) recordSet.cursor();
@@ -100,6 +111,38 @@ public class TestClpRecordCursor
             assertTrue(cursor.advanceNextPosition());
             assertEquals(cursor.getLong(3), i);
         }
+        assertFalse(cursor.advanceNextPosition());
+    }
+
+    @Test
+    public void testPredicate()
+    {
+        FunctionAndTypeManager functionAndTypeManager = createTestFunctionAndTypeManager();
+        CallExpression callExpression =
+                new CallExpression(EQUAL.name(),
+                        functionAndTypeManager.resolveOperator(EQUAL, fromTypes(
+                                BigintType.BIGINT, BigintType.BIGINT)),
+                        BOOLEAN,
+                        ImmutableList.of(new VariableReferenceExpression(Optional.empty(),
+                                        "a_bigint",
+                                        BigintType.BIGINT),
+                                constant(1L, BigintType.BIGINT)));
+        String query = ClpPlanOptimizer.buildKqlQuery(callExpression);
+        ClpRecordSetProvider recordSetProvider = new ClpRecordSetProvider(clpClient);
+        ClpRecordSet recordSet = (ClpRecordSet) recordSetProvider.getRecordSet(
+                ClpTransactionHandle.INSTANCE,
+                SESSION,
+                new ClpSplit("default", "test_1_table", Optional.of(query)),
+                new ArrayList<>(clpClient.listColumns("test_1_table")));
+        assertNotNull(recordSet, "recordSet is null");
+        ClpRecordCursor cursor = (ClpRecordCursor) recordSet.cursor();
+        assertNotNull(cursor, "cursor is null");
+        assertTrue(cursor.advanceNextPosition());
+        assertEquals(cursor.getLong(0), 1);
+        assertEquals(cursor.getDouble(2), 2.0);
+        assertTrue(cursor.getBoolean(5));
+        assertEquals(cursor.getSlice(6).toStringUtf8(), "Hello world");
+        assertNull(cursor, List.of(1, 3, 4));
         assertFalse(cursor.advanceNextPosition());
     }
 
