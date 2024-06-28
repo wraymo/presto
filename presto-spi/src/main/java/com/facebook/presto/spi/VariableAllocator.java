@@ -27,7 +27,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.unmodifiableMap;
-import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
 public class VariableAllocator
@@ -98,7 +97,7 @@ public class VariableAllocator
         requireNonNull(type, "type is null");
 
         // TODO: workaround for the fact that QualifiedName lowercases parts
-        nameHint = nameHint.toLowerCase(ENGLISH);
+//        nameHint = nameHint.toLowerCase(ENGLISH);
 
         // don't strip the tail if the only _ is the first character
         int index = nameHint.lastIndexOf("_");
