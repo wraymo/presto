@@ -33,12 +33,12 @@ import com.facebook.presto.spi.relation.DeterminismEvaluator;
 import com.facebook.presto.spi.relation.ExpressionOptimizer;
 import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.relation.SpecialFormExpression;
+import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import io.airlift.slice.Slice;
 
 import java.util.Optional;
 
 import static com.facebook.presto.spi.ConnectorPlanRewriter.rewriteWith;
-import static com.facebook.presto.spi.relation.ExpressionOptimizer.Level.OPTIMIZED;
 
 public class ClpPlanOptimizer
         implements ConnectorPlanOptimizer
@@ -74,6 +74,36 @@ public class ClpPlanOptimizer
             return ((Slice) literal.getValue()).toStringUtf8();
         }
         return literal.toString();
+    }
+
+    private static String handleCardinalitySplit(RowExpression additionalPredicate)
+    {
+        CallExpression cardinalityExpression = (CallExpression) additionalPredicate;
+        if (!(cardinalityExpression.getArguments().size() == 1 && cardinalityExpression.getArguments()
+                .get(0)
+                .toString()
+                .startsWith("SPLIT"))) {
+            throw new RuntimeException("Unsupported predicate" + cardinalityExpression);
+        }
+
+        CallExpression splitExpression = (CallExpression) cardinalityExpression.getArguments().get(0);
+        if (!(splitExpression.getArguments().size() == 3 && splitExpression.getArguments()
+                .get(0) instanceof VariableReferenceExpression && splitExpression.getArguments()
+                .get(1) instanceof ConstantExpression && splitExpression.getArguments()
+                .get(2) instanceof ConstantExpression)) {
+            throw new RuntimeException("Unsupported predicate" + splitExpression);
+        }
+
+        VariableReferenceExpression variableReferenceExpression =
+                (VariableReferenceExpression) splitExpression.getArguments().get(0);
+        ConstantExpression startExpression = (ConstantExpression) splitExpression.getArguments().get(1);
+        ConstantExpression endExpression = (ConstantExpression) splitExpression.getArguments().get(2);
+        if (!(startExpression.getType() == VarcharType.VARCHAR && endExpression.toString().equals("2"))) {
+            throw new RuntimeException("Unsupported predicate" + splitExpression);
+        }
+
+        String variableName = getVariableName(variableReferenceExpression.toString());
+        return variableName + ": \"*" + getLiteralString(startExpression) + "*\"";
     }
 
     public static String buildKqlQuery(RowExpression additionalPredicate)
@@ -122,6 +152,53 @@ public class ClpPlanOptimizer
         }
         else if (additionalPredicate instanceof CallExpression) {
             CallExpression callExpression = (CallExpression) additionalPredicate;
+            // Handle "=(CARDINALITY(SPLIT(field, string, 2)), 2)" case specifically
+            // TODO: Handle it more generically
+            if (callExpression.getDisplayName().equals("=")) {
+                if (!(callExpression.getArguments().size() == 2 && callExpression.getArguments()
+                        .get(1).toString().equals("2") && callExpression.getArguments()
+                        .get(0)
+                        .toString()
+                        .startsWith("CARDINALITY"))) {
+                    throw new RuntimeException("Unsupported predicate" + callExpression);
+                }
+
+                return handleCardinalitySplit(callExpression.getArguments().get(0));
+            }
+
+            // Handle "<>(CARDINALITY(field), 2)" case specifically
+            if (callExpression.getDisplayName().equals("<>") && callExpression.getArguments().size() == 2 &&
+                    callExpression.getArguments().get(1).toString().equals("2") &&
+                    callExpression.getArguments().get(0).toString().startsWith("CARDINALITY")) {
+                return "NOT " + handleCardinalitySplit(callExpression.getArguments().get(0));
+            }
+
+            // Handle "not" case specifically
+            if (callExpression.getDisplayName().equals("not")) {
+                return "NOT(" + buildKqlQuery(callExpression.getArguments().get(0)) + ")";
+            }
+
+            // Handle "LIKE(FIELD, CAST(PATTERN))" case specifically
+            if (callExpression.getDisplayName().equals("LIKE")) {
+                if (!(callExpression.getArguments().size() == 2 && callExpression.getArguments()
+                        .get(1)
+                        .toString()
+                        .startsWith("CAST"))) {
+                    throw new RuntimeException("Unsupported predicate" + additionalPredicate);
+                }
+
+                CallExpression castExpression = (CallExpression) callExpression.getArguments().get(1);
+                if (!(castExpression.getArguments().size() == 1 && castExpression.getArguments()
+                        .get(0) instanceof ConstantExpression)) {
+                    throw new RuntimeException("Unsupported predicate" + castExpression);
+                }
+
+                String variableName = getVariableName(callExpression.getArguments().get(0).toString());
+                ConstantExpression literal = (ConstantExpression) castExpression.getArguments().get(0);
+                String literalString = getLiteralString(literal);
+                return variableName + ": \"" + literalString.replace("%", "*") + "\"";
+            }
+
             String variableName = getVariableName(callExpression.getArguments().get(0).toString());
             ConstantExpression literal = (ConstantExpression) callExpression.getArguments().get(1);
             String literalString = getLiteralString(literal);
@@ -150,7 +227,7 @@ public class ClpPlanOptimizer
                     return variableName + " <= " + literalString;
             }
         }
-        throw new RuntimeException("Unsupported predicate type");
+        throw new RuntimeException("Unsupported predicate" + additionalPredicate);
     }
 
     @Override
@@ -184,9 +261,10 @@ public class ClpPlanOptimizer
             TableScanNode tableScanNode = (TableScanNode) node.getSource();
             TableHandle tableHandle = tableScanNode.getTable();
             ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle.getConnectorHandle();
-            RowExpression predicate = expressionOptimizer.optimize(node.getPredicate(), OPTIMIZED, session);
-            predicate = logicalRowExpressions.convertToConjunctiveNormalForm(predicate);
-            String query = buildKqlQuery(predicate);
+            // Remove them temporarily as we cannot handle io.airlift.joni.Regex
+//            RowExpression predicate = expressionOptimizer.optimize(node.getPredicate(), OPTIMIZED, session);
+//            predicate = logicalRowExpressions.convertToConjunctiveNormalForm(predicate);
+            String query = buildKqlQuery(node.getPredicate());
             log.info("Query: " + query);
             ClpTableLayoutHandle clpTableLayoutHandle = new ClpTableLayoutHandle(clpTableHandle, Optional.of(query));
             return new TableScanNode(
