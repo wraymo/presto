@@ -54,6 +54,26 @@ namespace facebook::presto {
 
 namespace {
 
+// Repeatedly calls for cleanOldTasks() for a while to ensure that we overcome a
+// potential race condition where we call cleanOldTasks() before some Tasks are
+// ready to be cleaned.
+void waitForAllOldTasksToBeCleaned(
+    TaskManager* taskManager,
+    uint64_t maxWaitUs) {
+  taskManager->cleanOldTasks();
+
+  uint64_t waitUs = 0;
+  while (taskManager->getNumTasks() > 0) {
+    constexpr uint64_t kWaitInternalUs = 1'000;
+    std::this_thread::sleep_for(std::chrono::microseconds(kWaitInternalUs));
+    waitUs += kWaitInternalUs;
+    taskManager->cleanOldTasks();
+    if (waitUs >= maxWaitUs) {
+      break;
+    }
+  }
+}
+
 // Generates task ID in Presto-compatible format.
 class TaskIdGenerator {
  public:
@@ -189,7 +209,7 @@ class TaskManagerTest : public testing::Test {
     exec::ExchangeSource::registerFactory(
         [cpuExecutor = exchangeCpuExecutor_,
          ioExecutor = exchangeIoExecutor_,
-         connectionPools = connectionPools_](
+         connPool = connPool_](
             const std::string& taskId,
             int destination,
             std::shared_ptr<exec::ExchangeQueue> queue,
@@ -201,7 +221,7 @@ class TaskManagerTest : public testing::Test {
               pool,
               cpuExecutor.get(),
               ioExecutor.get(),
-              connectionPools.get(),
+              connPool.get(),
               nullptr);
         });
     if (!isRegisteredVectorSerde()) {
@@ -644,8 +664,8 @@ class TaskManagerTest : public testing::Test {
           8,
           std::make_shared<folly::NamedThreadFactory>("HTTPSrvIO"));
   long splitSequenceId_{0};
-  std::shared_ptr<ConnectionPools> connectionPools_ =
-      std::make_shared<ConnectionPools>();
+  std::shared_ptr<http::HttpClientConnectionPool> connPool_ =
+      std::make_shared<http::HttpClientConnectionPool>();
 };
 
 // Runs "select * from t where c0 % 5 = 0" query.
@@ -946,10 +966,7 @@ TEST_F(TaskManagerTest, emptyFile) {
     if (not taskStatus->failures.empty()) {
       EXPECT_EQ(1, taskStatus->failures.size());
       const auto& failure = taskStatus->failures.front();
-      EXPECT_THAT(
-          failure.message,
-          testing::ContainsRegex(
-              "fileLength_ > 0 ORC file is empty Split \\[.*\\] Task scan\\.0\\.0\\.1\\.0"));
+      EXPECT_THAT(failure.message, testing::ContainsRegex("ORC file is empty"));
       EXPECT_EQ("VeloxException", failure.type);
       break;
     }
@@ -1383,8 +1400,7 @@ TEST_F(TaskManagerTest, testCumulativeMemory) {
   // The initial reported cumulative memory must be less than the expected value
   // below.
   ASSERT_LE(
-      lastCumulativeTotalMemory,
-      memoryUsage * (lastTimeMs - startTimeMs) / 1'000);
+      lastCumulativeTotalMemory, memoryUsage * (lastTimeMs - startTimeMs));
   // Presto native doesn't differentiate user and system memory.
   ASSERT_EQ(
       lastCumulativeTotalMemory, prestoTaskInfo.stats.cumulativeUserMemory);
@@ -1403,8 +1419,7 @@ TEST_F(TaskManagerTest, testCumulativeMemory) {
   ASSERT_EQ(prestoTaskInfo.stats.systemMemoryReservationInBytes, 0);
   ASSERT_LE(
       prestoTaskInfo.stats.cumulativeTotalMemory,
-      lastCumulativeTotalMemory +
-          memoryUsage * (currentTimeMs - lastTimeMs) / 1'000);
+      lastCumulativeTotalMemory + memoryUsage * (currentTimeMs - lastTimeMs));
   ASSERT_LT(
       lastCumulativeTotalMemory, prestoTaskInfo.stats.cumulativeTotalMemory);
   ASSERT_EQ(
@@ -1536,7 +1551,7 @@ TEST_F(TaskManagerTest, buildSpillDirectoryFailure) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }
     }
-    taskManager_->cleanOldTasks();
+    waitForAllOldTasksToBeCleaned(taskManager_.get(), 3'000'000);
     velox::exec::test::waitForAllTasksToBeDeleted(3'000'000);
     ASSERT_TRUE(taskManager_->tasks().empty());
   }

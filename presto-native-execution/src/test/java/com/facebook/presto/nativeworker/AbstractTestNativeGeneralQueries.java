@@ -258,10 +258,10 @@ public abstract class AbstractTestNativeGeneralQueries
         // column_name | data_size | distinct_values_count | nulls_fraction | row_count | low_value | high_value
         assertQuery("SHOW STATS FOR region",
                 "SELECT * FROM (VALUES" +
-                        "('regionkey', NULL, 5.0, 0.0, NULL, '0', '4')," +
-                        "('name', 54.0, 5.0, 0.0, NULL, NULL, NULL)," +
-                        "('comment', 350.0, 5.0, 0.0, NULL, NULL, NULL)," +
-                        "(NULL, NULL, NULL, NULL, 5.0, NULL, NULL))");
+                        "('regionkey', NULL, 5.0, 0.0, NULL, '0', '4', NULL)," +
+                        "('name', 54.0, 5.0, 0.0, NULL, NULL, NULL, NULL)," +
+                        "('comment', 350.0, 5.0, 0.0, NULL, NULL, NULL, NULL)," +
+                        "(NULL, NULL, NULL, NULL, 5.0, NULL, NULL, NULL))");
 
         // Create a partitioned table and run analyze on it.
         String tmpTableName = generateRandomTableName();
@@ -275,17 +275,17 @@ public abstract class AbstractTestNativeGeneralQueries
             assertUpdate(String.format("ANALYZE %s", tmpTableName), 25);
             assertQuery(String.format("SHOW STATS for %s", tmpTableName),
                     "SELECT * FROM (VALUES" +
-                            "('name', 277.0, 1.0, 0.0, NULL, NULL, NULL)," +
-                            "('regionkey', NULL, 5.0, 0.0, NULL, '0', '4')," +
-                            "('nationkey', NULL, 25.0, 0.0, NULL, '0', '24')," +
-                            "(NULL, NULL, NULL, NULL, 25.0, NULL, NULL))");
+                            "('name', 277.0, 1.0, 0.0, NULL, NULL, NULL, NULL)," +
+                            "('regionkey', NULL, 5.0, 0.0, NULL, '0', '4', NULL)," +
+                            "('nationkey', NULL, 25.0, 0.0, NULL, '0', '24', NULL)," +
+                            "(NULL, NULL, NULL, NULL, 25.0, NULL, NULL, NULL))");
             assertUpdate(String.format("ANALYZE %s WITH (partitions = ARRAY[ARRAY['0','0'],ARRAY['4', '11']])", tmpTableName), 2);
             assertQuery(String.format("SHOW STATS for (SELECT * FROM %s where regionkey=4 and nationkey=11)", tmpTableName),
                     "SELECT * FROM (VALUES" +
-                            "('name', 8.0, 1.0, 0.0, NULL, NULL, NULL)," +
-                            "('regionkey', NULL, 1.0, 0.0, NULL, '4', '4')," +
-                            "('nationkey', NULL, 1.0, 0.0, NULL, '11', '11')," +
-                            "(NULL, NULL, NULL, NULL, 1.0, NULL, NULL))");
+                            "('name', 8.0, 1.0, 0.0, NULL, NULL, NULL, NULL)," +
+                            "('regionkey', NULL, 1.0, 0.0, NULL, '4', '4', NULL)," +
+                            "('nationkey', NULL, 1.0, 0.0, NULL, '11', '11', NULL)," +
+                            "(NULL, NULL, NULL, NULL, 1.0, NULL, NULL, NULL))");
         }
         finally {
             dropTableIfExists(tmpTableName);
@@ -305,9 +305,9 @@ public abstract class AbstractTestNativeGeneralQueries
             assertUpdate(String.format("ANALYZE %s", tmpTableName), 7);
             assertQuery(String.format("SHOW STATS for %s", tmpTableName),
                     "SELECT * FROM (VALUES" +
-                            "('c0', NULL,4.0 , 0.2857142857142857, NULL, '-542392.89', '1000000.12')," +
-                            "('c1', NULL,4.0 , 0.2857142857142857, NULL,  '-6.72398239210929E12', '2.823982323232357E13')," +
-                            "(NULL, NULL, NULL, NULL, 7.0, NULL, NULL))");
+                            "('c0', NULL,4.0 , 0.2857142857142857, NULL, '-542392.89', '1000000.12', NULL)," +
+                            "('c1', NULL,4.0 , 0.2857142857142857, NULL,  '-6.72398239210929E12', '2.823982323232357E13', NULL)," +
+                            "(NULL, NULL, NULL, NULL, 7.0, NULL, NULL, NULL))");
         }
         finally {
             dropTableIfExists(tmpTableName);
@@ -428,6 +428,14 @@ public abstract class AbstractTestNativeGeneralQueries
         assertQuery("SELECT CAST(true as VARCHAR), CAST(false as VARCHAR)");
         assertQuery("SELECT CAST(0.0 as VARCHAR)");
 
+        // Cast to varchar(n).
+        assertQuery("SELECT CAST(comment as VARCHAR(1)) FROM orders");
+        assertQuery("SELECT CAST(comment as VARCHAR(1000)) FROM orders WHERE LENGTH(comment) < 1000");
+        assertQuery("SELECT CAST(c0 AS VARCHAR(1)) FROM ( VALUES (NULL) ) t(c0)");
+        assertQuery("SELECT CAST(c0 AS VARCHAR(1)) FROM ( VALUES ('') ) t(c0)");
+        assertQuery("SELECT CAST(is_returned as VARCHAR(1)), CAST(linenumber_as_tinyint as VARCHAR(1)), CAST(linenumber_as_smallint as VARCHAR(1)), " +
+                "CAST(linenumber as VARCHAR(1)), CAST(tax_as_real as VARCHAR(1)), CAST(tax as VARCHAR(1)) FROM lineitem");
+
         assertQuery("SELECT try_cast(linenumber as TINYINT), try_cast(linenumber AS SMALLINT), "
                 + "try_cast(linenumber AS INTEGER), try_cast(linenumber AS BIGINT), try_cast(quantity AS REAL), "
                 + "try_cast(orderkey AS DOUBLE), try_cast(orderkey AS VARCHAR) FROM lineitem");
@@ -520,13 +528,13 @@ public abstract class AbstractTestNativeGeneralQueries
         assertQuery("SELECT cast(row(orderkey, comment) as row(\"123\" varchar, \"456\" varchar)) FROM orders");
 
         // Cast timestamp with time zone
-        assertQuery("SELECT cast(from_unixtime(orderkey) as timestamp with time zone) from orders");
-        assertQuery(legacyTimestampDisabled, "SELECT cast(from_unixtime(orderkey) as timestamp with time zone) from orders");
+        assertQueryFails("SELECT cast(from_unixtime(orderkey) as timestamp with time zone) from orders", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
+        assertQueryFails(legacyTimestampDisabled, "SELECT cast(from_unixtime(orderkey) as timestamp with time zone) from orders", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
         // Cast timestamp with time zone to timestamp
-        assertQuery("SELECT cast(from_unixtime(orderkey, '+01:00') as timestamp), " +
-                "cast(from_unixtime(orderkey, 'America/Los_Angeles') as timestamp) from orders");
-        assertQuery(legacyTimestampDisabled, "SELECT cast(from_unixtime(orderkey, '+01:00') as timestamp), " +
-                "cast(from_unixtime(orderkey, 'America/Los_Angeles') as timestamp) from orders");
+        assertQueryFails("SELECT cast(from_unixtime(orderkey, '+01:00') as timestamp), " +
+                "cast(from_unixtime(orderkey, 'America/Los_Angeles') as timestamp) from orders", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
+        assertQueryFails(legacyTimestampDisabled, "SELECT cast(from_unixtime(orderkey, '+01:00') as timestamp), " +
+                "cast(from_unixtime(orderkey, 'America/Los_Angeles') as timestamp) from orders", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
     }
 
     @Test
@@ -830,6 +838,25 @@ public abstract class AbstractTestNativeGeneralQueries
 
         // Reverse
         assertQuery("SELECT comment, reverse(comment) FROM orders");
+
+        // Normalize
+        String tmpTableName = generateRandomTableName();
+        try {
+            getQueryRunner().execute(String.format("CREATE TABLE %s (c0 VARCHAR)", tmpTableName));
+            getQueryRunner().execute(String.format("INSERT INTO %s VALUES " +
+                    "('\\u3231\\u3327\\u3326\\u2162\\u3231\\u3327\\u3326\\u2162\\u3231\\u3327\\u3326\\u2162'), " +
+                    "('\\xEF\\xBE\\x8'), " +
+                    "('sch\\u00f6n') ", tmpTableName));
+
+            assertQuery("SELECT normalize(comment) FROM orders");
+            assertQuery("SELECT normalize(comment, NFKC) FROM nation");
+            assertQuery("SELECT normalize(comment, NFD) FROM nation");
+            assertQuery(String.format("SELECT normalize(c0) from %s", tmpTableName));
+            assertQuery(String.format("SELECT normalize(c0, NFKD) from %s", tmpTableName));
+        }
+        finally {
+            dropTableIfExists(tmpTableName);
+        }
     }
 
     @Test
@@ -1184,22 +1211,22 @@ public abstract class AbstractTestNativeGeneralQueries
     @Test
     public void testTimestampWithTimeZone()
     {
-        assertQuery("SELECT from_unixtime(orderkey, '+01:00'), from_unixtime(orderkey, '-05:00'), from_unixtime(orderkey, 'Europe/Moscow') FROM orders");
-        assertQuery("SELECT from_unixtime(orderkey, '+01:00'), count(1) FROM orders GROUP BY 1");
+        assertQueryFails("SELECT from_unixtime(orderkey, '+01:00'), from_unixtime(orderkey, '-05:00'), from_unixtime(orderkey, 'Europe/Moscow') FROM orders", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
+        assertQueryFails("SELECT from_unixtime(orderkey, '+01:00'), count(1) FROM orders GROUP BY 1", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
 
-        assertQuery("SELECT parse_datetime(cast(1970 + nationkey as varchar) || '-01-02+00:' || cast(10 + (3 * nationkey) % 50 as varchar), 'YYYY-MM-dd+HH:mm'), parse_datetime(cast(1970 + nationkey as varchar) || '-01-02+00:' || cast(10 + (3 * nationkey) % 50 as varchar) || '+14:00', 'YYYY-MM-dd+HH:mmZZ') FROM nation");
+        assertQueryFails("SELECT parse_datetime(cast(1970 + nationkey as varchar) || '-01-02+00:' || cast(10 + (3 * nationkey) % 50 as varchar), 'YYYY-MM-dd+HH:mm'), parse_datetime(cast(1970 + nationkey as varchar) || '-01-02+00:' || cast(10 + (3 * nationkey) % 50 as varchar) || '+14:00', 'YYYY-MM-dd+HH:mmZZ') FROM nation", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
 
-        assertQuery("SELECT to_unixtime(from_unixtime(orderkey, '+01:00')), to_unixtime(from_unixtime(orderkey, '-05:00')), to_unixtime(from_unixtime(orderkey, 'Europe/Moscow')) FROM orders");
-        assertQuery("SELECT to_unixtime(from_unixtime(orderkey, '+01:00')), count(1) FROM orders GROUP BY 1");
-        assertQuery("SELECT to_unixtime(parse_datetime(cast(1970 + nationkey as varchar) || '-01-02+00:' || cast(10 + (3 * nationkey) % 50 as varchar), 'YYYY-MM-dd+HH:mm')), to_unixtime(parse_datetime(cast(1970 + nationkey as varchar) || '-01-02+00:' || cast(10 + (3 * nationkey) % 50 as varchar) || '+14:00', 'YYYY-MM-dd+HH:mmZZ')) FROM nation");
-        assertQuery("SELECT timestamp '2012-10-31 01:00 UTC' AT TIME ZONE 'America/Los_Angeles'");
-        assertQuery("SELECT ARRAY[timestamp '2018-02-06 23:00:00.000 Australia/Melbourne', null, timestamp '2012-10-31 01:00 UTC' AT TIME ZONE 'America/Los_Angeles']");
+        assertQueryFails("SELECT to_unixtime(from_unixtime(orderkey, '+01:00')), to_unixtime(from_unixtime(orderkey, '-05:00')), to_unixtime(from_unixtime(orderkey, 'Europe/Moscow')) FROM orders", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
+        assertQueryFails("SELECT to_unixtime(from_unixtime(orderkey, '+01:00')), count(1) FROM orders GROUP BY 1", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
+        assertQueryFails("SELECT to_unixtime(parse_datetime(cast(1970 + nationkey as varchar) || '-01-02+00:' || cast(10 + (3 * nationkey) % 50 as varchar), 'YYYY-MM-dd+HH:mm')), to_unixtime(parse_datetime(cast(1970 + nationkey as varchar) || '-01-02+00:' || cast(10 + (3 * nationkey) % 50 as varchar) || '+14:00', 'YYYY-MM-dd+HH:mmZZ')) FROM nation", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
+        assertQueryFails("SELECT timestamp '2012-10-31 01:00 UTC' AT TIME ZONE 'America/Los_Angeles'", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
+        assertQueryFails("SELECT ARRAY[timestamp '2018-02-06 23:00:00.000 Australia/Melbourne', null, timestamp '2012-10-31 01:00 UTC' AT TIME ZONE 'America/Los_Angeles']", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
 
-        assertQuery("SELECT orderkey, year(from_unixtime(orderkey, '+01:00')), quarter(from_unixtime(orderkey, '-07:00')), month(from_unixtime(orderkey, '+00:00')), day(from_unixtime(orderkey, '-13:00')), day_of_week(from_unixtime(orderkey, '+03:00')), day_of_year(from_unixtime(orderkey, '-13:00')), year_of_week(from_unixtime(orderkey, '+14:00')), hour(from_unixtime(orderkey, '+01:00')), minute(from_unixtime(orderkey, '+01:00')), second(from_unixtime(orderkey, '-07:00')), millisecond(from_unixtime(orderkey, '+03:00')) FROM orders");
-        assertQuery("SELECT orderkey, date_trunc('year', from_unixtime(orderkey, '-03:00')), date_trunc('quarter', from_unixtime(orderkey, '+14:00')), date_trunc('month', from_unixtime(orderkey, '+03:00')), date_trunc('day', from_unixtime(orderkey, '-07:00')), date_trunc('hour', from_unixtime(orderkey, '-09:30')), date_trunc('minute', from_unixtime(orderkey, '+05:30')), date_trunc('second', from_unixtime(orderkey, '+00:00')) FROM orders");
+        assertQueryFails("SELECT orderkey, year(from_unixtime(orderkey, '+01:00')), quarter(from_unixtime(orderkey, '-07:00')), month(from_unixtime(orderkey, '+00:00')), day(from_unixtime(orderkey, '-13:00')), day_of_week(from_unixtime(orderkey, '+03:00')), day_of_year(from_unixtime(orderkey, '-13:00')), year_of_week(from_unixtime(orderkey, '+14:00')), hour(from_unixtime(orderkey, '+01:00')), minute(from_unixtime(orderkey, '+01:00')), second(from_unixtime(orderkey, '-07:00')), millisecond(from_unixtime(orderkey, '+03:00')) FROM orders", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
+        assertQueryFails("SELECT orderkey, date_trunc('year', from_unixtime(orderkey, '-03:00')), date_trunc('quarter', from_unixtime(orderkey, '+14:00')), date_trunc('month', from_unixtime(orderkey, '+03:00')), date_trunc('day', from_unixtime(orderkey, '-07:00')), date_trunc('hour', from_unixtime(orderkey, '-09:30')), date_trunc('minute', from_unixtime(orderkey, '+05:30')), date_trunc('second', from_unixtime(orderkey, '+00:00')) FROM orders", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
 
-        assertQuery("SELECT timezone_hour(from_unixtime(orderkey, 'Asia/Oral')) FROM orders");
-        assertQuery("SELECT timezone_minute(from_unixtime(orderkey, 'Asia/Kolkata')) FROM orders");
+        assertQueryFails("SELECT timezone_hour(from_unixtime(orderkey, 'Asia/Oral')) FROM orders", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
+        assertQueryFails("SELECT timezone_minute(from_unixtime(orderkey, 'Asia/Kolkata')) FROM orders", ".*Timestamp with Timezone type is not supported in Prestissimo.*");
     }
 
     @Test
@@ -1561,6 +1588,51 @@ public abstract class AbstractTestNativeGeneralQueries
                 .setSystemProperty(KEY_BASED_SAMPLING_ENABLED, "true")
                 .build();
         assertQuerySucceeds(session, "select count(1) from orders join lineitem using(orderkey)");
+    }
+
+    @Test
+    public void testColumnFilter()
+    {
+        String tmpTableName = generateRandomTableName();
+        assertUpdate(format("CREATE TABLE %s " +
+                "AS " +
+                "SELECT c_boolean, c_bigint, c_double, c_timestamp, c_varchar, c_varbinary " +
+                "FROM ( " +
+                "  VALUES " +
+                "    (null, null, null, null, null, null), " +
+                "    (true, BIGINT '1', DOUBLE '2.2', TIMESTAMP '2012-08-08 01:00', CAST('abc1' AS VARCHAR), to_ieee754_64(1))," +
+                "    (false, BIGINT '0', DOUBLE '1.2', TIMESTAMP '2012-08-08 00:00', CAST('abc2' AS VARCHAR), to_ieee754_64(2))," +
+                "    (true, BIGINT '2', DOUBLE '3.3', TIMESTAMP '2012-09-09 01:00', CAST('cba1' AS VARCHAR), to_ieee754_64(3)), " +
+                "    (false, BIGINT '1', DOUBLE '2.3', TIMESTAMP '2012-09-09 00:00', CAST('cba2' AS VARCHAR), to_ieee754_64(4)) " +
+                ") AS x (c_boolean, c_bigint, c_double, c_timestamp, c_varchar, c_varbinary)", tmpTableName), 5);
+
+        // Filter on BOOLEAN column.
+        assertQuery(format("SELECT c_boolean, c_bigint, c_double, c_varchar, c_varbinary FROM %s WHERE c_boolean", tmpTableName));
+
+        // Filter on BIGINT column.
+        assertQuery(format("SELECT c_boolean, c_bigint, c_double, c_varchar, c_varbinary FROM %s WHERE c_bigint = 0", tmpTableName));
+
+        // Filter on DOUBLE column.
+        assertQuery(format("SELECT c_boolean, c_bigint, c_double, c_varchar, c_varbinary FROM %s WHERE c_double = 1.2", tmpTableName));
+
+        // Filter on VARCHAR column.
+        assertQuery(format("SELECT c_boolean, c_bigint, c_double, c_varchar, c_varbinary FROM %s WHERE c_varchar = CAST('cba2' AS VARCHAR)", tmpTableName));
+
+        // Filter on TIMESTAMP column.
+        // NOTE: c_timestamp field in Velox uses the America/Los_Angeles time zone when reading and writing
+        // TIMESTAMP type data in DWRF/ORC format (see https://github.com/facebookincubator/velox/issues/8127),
+        // while Presto Java uses the America/Bahia_Banderas time zone when reading TIMESTAMP during the test
+        // (see com.facebook.presto.hive.HiveQueryRunner),
+        // Therefore, the data read by the two engines will be inconsistent. So using a VALUES list for the
+        // validation.
+        assertQuery(format("SELECT * FROM %s WHERE c_TIMESTAMP = TIMESTAMP '2012-09-09 00:00'", tmpTableName), "VALUES(false, BIGINT '1', DOUBLE '2.3', TIMESTAMP '2012-09-09 00:00', CAST('cba2' AS VARCHAR), to_ieee754_64(4))");
+
+        // NOTE: Presto Java's DWRF format does not support pushing down VARBINARY type filters to TableScan, so we need to disable filter pushdown.
+        Session session = Session.builder(getSession())
+                .setCatalogSessionProperty("hive", "pushdown_filter_enabled", "false")
+                .build();
+        // Filter on VARBINARY column.
+        assertQuery(session, format("SELECT c_boolean, c_bigint, c_double, c_varchar, c_varbinary FROM %s WHERE c_varbinary = to_ieee754_64(1)", tmpTableName));
     }
 
     private void assertQueryResultCount(String sql, int expectedResultCount)

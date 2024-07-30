@@ -90,8 +90,6 @@ import com.facebook.presto.operator.aggregation.SumDataSizeForStats;
 import com.facebook.presto.operator.aggregation.VarianceAggregation;
 import com.facebook.presto.operator.aggregation.approxmostfrequent.ApproximateMostFrequent;
 import com.facebook.presto.operator.aggregation.arrayagg.ArrayAggregationFunction;
-import com.facebook.presto.operator.aggregation.arrayagg.SetAggregationFunction;
-import com.facebook.presto.operator.aggregation.arrayagg.SetUnionFunction;
 import com.facebook.presto.operator.aggregation.differentialentropy.DifferentialEntropyAggregation;
 import com.facebook.presto.operator.aggregation.histogram.Histogram;
 import com.facebook.presto.operator.aggregation.multimapagg.AlternativeMultimapAggregationFunction;
@@ -148,6 +146,8 @@ import com.facebook.presto.operator.scalar.ArrayShuffleFunction;
 import com.facebook.presto.operator.scalar.ArraySliceFunction;
 import com.facebook.presto.operator.scalar.ArraySortComparatorFunction;
 import com.facebook.presto.operator.scalar.ArraySortFunction;
+import com.facebook.presto.operator.scalar.ArraySumBigIntFunction;
+import com.facebook.presto.operator.scalar.ArraySumDoubleFunction;
 import com.facebook.presto.operator.scalar.ArrayTrimFunction;
 import com.facebook.presto.operator.scalar.ArrayUnionFunction;
 import com.facebook.presto.operator.scalar.ArraysOverlapFunction;
@@ -246,6 +246,7 @@ import com.facebook.presto.type.DateOperators;
 import com.facebook.presto.type.DateTimeOperators;
 import com.facebook.presto.type.DecimalOperators;
 import com.facebook.presto.type.DecimalParametricType;
+import com.facebook.presto.type.DoubleComparisonOperators;
 import com.facebook.presto.type.DoubleOperators;
 import com.facebook.presto.type.EnumCasts;
 import com.facebook.presto.type.HyperLogLogOperators;
@@ -255,10 +256,13 @@ import com.facebook.presto.type.IntervalYearMonthOperators;
 import com.facebook.presto.type.IpAddressOperators;
 import com.facebook.presto.type.IpPrefixOperators;
 import com.facebook.presto.type.KllSketchOperators;
+import com.facebook.presto.type.LegacyDoubleComparisonOperators;
+import com.facebook.presto.type.LegacyRealComparisonOperators;
 import com.facebook.presto.type.LikeFunctions;
 import com.facebook.presto.type.LongEnumOperators;
 import com.facebook.presto.type.MapParametricType;
 import com.facebook.presto.type.QuantileDigestOperators;
+import com.facebook.presto.type.RealComparisonOperators;
 import com.facebook.presto.type.RealOperators;
 import com.facebook.presto.type.SfmSketchOperators;
 import com.facebook.presto.type.SmallintOperators;
@@ -316,6 +320,7 @@ import static com.facebook.presto.common.type.BigintType.BIGINT;
 import static com.facebook.presto.common.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.common.type.DateType.DATE;
 import static com.facebook.presto.common.type.DoubleType.DOUBLE;
+import static com.facebook.presto.common.type.DoubleType.OLD_NAN_DOUBLE;
 import static com.facebook.presto.common.type.HyperLogLogType.HYPER_LOG_LOG;
 import static com.facebook.presto.common.type.IntegerType.INTEGER;
 import static com.facebook.presto.common.type.JsonType.JSON;
@@ -323,6 +328,7 @@ import static com.facebook.presto.common.type.KdbTreeType.KDB_TREE;
 import static com.facebook.presto.common.type.KllSketchParametricType.KLL_SKETCH;
 import static com.facebook.presto.common.type.P4HyperLogLogType.P4_HYPER_LOG_LOG;
 import static com.facebook.presto.common.type.QuantileDigestParametricType.QDIGEST;
+import static com.facebook.presto.common.type.RealType.OLD_NAN_REAL;
 import static com.facebook.presto.common.type.RealType.REAL;
 import static com.facebook.presto.common.type.SmallintType.SMALLINT;
 import static com.facebook.presto.common.type.TDigestParametricType.TDIGEST;
@@ -364,6 +370,8 @@ import static com.facebook.presto.operator.aggregation.RealAverageAggregation.RE
 import static com.facebook.presto.operator.aggregation.TDigestAggregationFunction.TDIGEST_AGG;
 import static com.facebook.presto.operator.aggregation.TDigestAggregationFunction.TDIGEST_AGG_WITH_WEIGHT;
 import static com.facebook.presto.operator.aggregation.TDigestAggregationFunction.TDIGEST_AGG_WITH_WEIGHT_AND_COMPRESSION;
+import static com.facebook.presto.operator.aggregation.arrayagg.SetAggregationFunction.SET_AGG;
+import static com.facebook.presto.operator.aggregation.arrayagg.SetUnionFunction.SET_UNION;
 import static com.facebook.presto.operator.aggregation.minmaxby.AlternativeMaxByAggregationFunction.ALTERNATIVE_MAX_BY;
 import static com.facebook.presto.operator.aggregation.minmaxby.AlternativeMinByAggregationFunction.ALTERNATIVE_MIN_BY;
 import static com.facebook.presto.operator.aggregation.minmaxby.MaxByAggregationFunction.MAX_BY;
@@ -604,15 +612,15 @@ public class BuiltInTypeAndFunctionNamespaceManager
                 .expireAfterWrite(1, HOURS)
                 .build(CacheLoader.from(this::instantiateParametricType));
 
-        registerBuiltInFunctions(getBuildInFunctions(featuresConfig));
-        registerBuiltInTypes();
+        registerBuiltInFunctions(getBuiltInFunctions(featuresConfig));
+        registerBuiltInTypes(featuresConfig);
 
         for (Type type : requireNonNull(types, "types is null")) {
             addType(type);
         }
     }
 
-    private void registerBuiltInTypes()
+    private void registerBuiltInTypes(FeaturesConfig featuresConfig)
     {
         // always add the built-in types; Presto will not function without these
         addType(UNKNOWN);
@@ -621,8 +629,14 @@ public class BuiltInTypeAndFunctionNamespaceManager
         addType(INTEGER);
         addType(SMALLINT);
         addType(TINYINT);
-        addType(DOUBLE);
-        addType(REAL);
+        if (!featuresConfig.getUseNewNanDefinition()) {
+            addType(OLD_NAN_DOUBLE);
+            addType(OLD_NAN_REAL);
+        }
+        else {
+            addType(DOUBLE);
+            addType(REAL);
+        }
         addType(VARBINARY);
         addType(DATE);
         addType(TIME);
@@ -664,7 +678,7 @@ public class BuiltInTypeAndFunctionNamespaceManager
         addParametricType(VARCHAR_ENUM);
     }
 
-    private List<? extends SqlFunction> getBuildInFunctions(FeaturesConfig featuresConfig)
+    private List<? extends SqlFunction> getBuiltInFunctions(FeaturesConfig featuresConfig)
     {
         FunctionListBuilder builder = new FunctionListBuilder()
                 .window(RowNumberFunction.class)
@@ -791,10 +805,21 @@ public class BuiltInTypeAndFunctionNamespaceManager
                 .scalars(TinyintOperators.class)
                 .scalar(TinyintOperators.TinyintDistinctFromOperator.class)
                 .scalars(DoubleOperators.class)
-                .scalar(DoubleOperators.DoubleDistinctFromOperator.class)
-                .scalars(RealOperators.class)
-                .scalar(RealOperators.RealDistinctFromOperator.class)
-                .scalars(VarcharOperators.class)
+                .scalars(RealOperators.class);
+
+        if (featuresConfig.getUseNewNanDefinition()) {
+            builder.scalars(DoubleComparisonOperators.class)
+                    .scalar(DoubleComparisonOperators.DoubleDistinctFromOperator.class)
+                    .scalars(RealComparisonOperators.class)
+                    .scalar(RealComparisonOperators.RealDistinctFromOperator.class);
+        }
+        else {
+            builder.scalars(LegacyDoubleComparisonOperators.class)
+                    .scalar(LegacyDoubleComparisonOperators.DoubleDistinctFromOperator.class)
+                    .scalars(LegacyRealComparisonOperators.class)
+                    .scalar(LegacyRealComparisonOperators.RealDistinctFromOperator.class);
+        }
+        builder.scalars(VarcharOperators.class)
                 .scalar(VarcharOperators.VarcharDistinctFromOperator.class)
                 .scalars(VarbinaryOperators.class)
                 .scalar(VarbinaryOperators.VarbinaryDistinctFromOperator.class)
@@ -832,6 +857,8 @@ public class BuiltInTypeAndFunctionNamespaceManager
                 .scalar(ArrayFilterFunction.class)
                 .scalar(ArrayPositionFunction.class)
                 .scalar(ArrayPositionWithIndexFunction.class)
+                .scalar(ArraySumBigIntFunction.class)
+                .scalar(ArraySumDoubleFunction.class)
                 .scalars(CombineHashFunction.class)
                 .scalars(JsonOperators.class)
                 .scalar(JsonOperators.JsonDistinctFromOperator.class)
@@ -905,8 +932,7 @@ public class BuiltInTypeAndFunctionNamespaceManager
                 .function(ARRAY_FLATTEN_FUNCTION)
                 .function(ARRAY_CONCAT_FUNCTION)
                 .functions(ARRAY_CONSTRUCTOR, ARRAY_SUBSCRIPT, ARRAY_TO_JSON, JSON_TO_ARRAY, JSON_STRING_TO_ARRAY)
-                .aggregate(SetAggregationFunction.class)
-                .aggregate(SetUnionFunction.class)
+                .functions(SET_AGG, SET_UNION)
                 .function(new ArrayAggregationFunction(featuresConfig.isLegacyArrayAgg(), featuresConfig.getArrayAggGroupImplementation()))
                 .functions(new MapSubscriptOperator(featuresConfig.isLegacyMapSubscript()))
                 .functions(MAP_CONSTRUCTOR, MAP_TO_JSON, JSON_TO_MAP, JSON_STRING_TO_MAP)

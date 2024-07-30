@@ -12,6 +12,7 @@ test-output/
 test-reports/
 /atlassian-ide-plugin.xml
 .idea
+.run
 .vscode
 .DS_Store
 .classpath

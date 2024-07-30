@@ -39,8 +39,7 @@ import static com.facebook.presto.SystemSessionProperties.LEGACY_TIMESTAMP;
 import static com.facebook.presto.common.type.TimeZoneKey.UTC_KEY;
 import static com.facebook.presto.common.type.VarcharType.VARCHAR;
 import static com.facebook.presto.iceberg.IcebergQueryRunner.ICEBERG_CATALOG;
-import static com.facebook.presto.iceberg.IcebergQueryRunner.TEST_CATALOG_DIRECTORY;
-import static com.facebook.presto.iceberg.IcebergQueryRunner.TEST_DATA_DIRECTORY;
+import static com.facebook.presto.iceberg.IcebergQueryRunner.getIcebergDataDirectoryPath;
 import static com.facebook.presto.iceberg.IcebergUtil.MIN_FORMAT_VERSION_FOR_DELETE;
 import static com.facebook.presto.iceberg.procedure.RegisterTableProcedure.METADATA_FOLDER_NAME;
 import static com.facebook.presto.iceberg.procedure.TestIcebergRegisterProcedure.getMetadataFileLocation;
@@ -89,6 +88,7 @@ public class IcebergDistributedSmokeTestBase
     public void testTimestampWithTimeZone()
     {
         assertQueryFails("CREATE TABLE test_timestamp_with_timezone (x timestamp with time zone)", "Iceberg column type timestamptz is not supported");
+        assertQueryFails("CREATE TABLE test_timestamp_with_timezone (x) AS SELECT TIMESTAMP '1969-12-01 00:00:00.000000 UTC'", "Iceberg column type timestamptz is not supported");
         assertUpdate("CREATE TABLE test_timestamp_with_timezone (x timestamp)");
         assertQueryFails("ALTER TABLE test_timestamp_with_timezone ADD COLUMN y timestamp with time zone", "Iceberg column type timestamptz is not supported");
         dropTable(getSession(), "test_timestamp_with_timezone");
@@ -1024,21 +1024,21 @@ public class IcebergDistributedSmokeTestBase
 
         assertQuery(session, "SHOW STATS FOR " + tableName,
                 "VALUES " +
-                        "  ('col', null, null, null, NULL, NULL, NULL), " +
-                        "  (NULL, NULL, NULL, NULL, 0e0, NULL, NULL)");
+                        "  ('col', null, null, null, NULL, NULL, NULL, NULL), " +
+                        "  (NULL, NULL, NULL, NULL, 0e0, NULL, NULL, NULL)");
 
         assertUpdate("INSERT INTO " + tableName + " VALUES -10", 1);
         assertUpdate("INSERT INTO " + tableName + " VALUES 100", 1);
 
         assertQuery(session, "SHOW STATS FOR " + tableName,
                 "VALUES " +
-                        "  ('col', NULL, NULL, 0.0, NULL, '-10.0', '100.0'), " +
-                        "  (NULL, NULL, NULL, NULL, 2e0, NULL, NULL)");
+                        "  ('col', NULL, NULL, 0.0, NULL, '-10.0', '100.0', NULL), " +
+                        "  (NULL, NULL, NULL, NULL, 2e0, NULL, NULL, NULL)");
         assertUpdate("INSERT INTO " + tableName + " VALUES 200", 1);
         assertQuery(session, "SHOW STATS FOR " + tableName,
                 "VALUES " +
-                        "  ('col', NULL, NULL, 0.0, NULL, '-10.0', '200.0'), " +
-                        "  (NULL, NULL, NULL, NULL, 3e0, NULL, NULL)");
+                        "  ('col', NULL, NULL, 0.0, NULL, '-10.0', '200.0', NULL), " +
+                        "  (NULL, NULL, NULL, NULL, 3e0, NULL, NULL, NULL)");
 
         dropTable(session, tableName);
     }
@@ -1109,8 +1109,8 @@ public class IcebergDistributedSmokeTestBase
 
     protected Path getCatalogDirectory()
     {
-        Path dataDirectory = getDistributedQueryRunner().getCoordinator().getDataDirectory().resolve(TEST_DATA_DIRECTORY);
-        return dataDirectory.getParent().resolve(TEST_CATALOG_DIRECTORY);
+        Path dataDirectory = getDistributedQueryRunner().getCoordinator().getDataDirectory();
+        return getIcebergDataDirectoryPath(dataDirectory, catalogType.name(), new IcebergConfig().getFileFormat(), false);
     }
 
     protected Table getIcebergTable(ConnectorSession session, String namespace, String tableName)
@@ -1186,16 +1186,16 @@ public class IcebergDistributedSmokeTestBase
 
         assertQuery(session, "SHOW STATS FOR " + tableName,
                 "VALUES " +
-                        "  ('col', null, null, null, NULL, NULL, NULL), " +
-                        "  (NULL, NULL, NULL, NULL, 0e0, NULL, NULL)");
+                        "  ('col', null, null, null, NULL, NULL, NULL, NULL), " +
+                        "  (NULL, NULL, NULL, NULL, 0e0, NULL, NULL, NULL)");
 
         assertUpdate(session, "INSERT INTO " + tableName + " VALUES TIMESTAMP '2021-01-02 09:04:05.321'", 1);
         assertUpdate(session, "INSERT INTO " + tableName + " VALUES TIMESTAMP '2022-12-22 10:07:08.456'", 1);
 
         assertQuery(session, "SHOW STATS FOR " + tableName,
                 "VALUES " +
-                        "  ('col', NULL, NULL, 0.0, NULL, '2021-01-02 09:04:05.321', '2022-12-22 10:07:08.456'), " +
-                        "  (NULL, NULL, NULL, NULL, 2e0, NULL, NULL)");
+                        "  ('col', NULL, NULL, 0.0, NULL, '2021-01-02 09:04:05.321', '2022-12-22 10:07:08.456', NULL), " +
+                        "  (NULL, NULL, NULL, NULL, 2e0, NULL, NULL, NULL)");
         dropTable(session, tableName);
     }
 

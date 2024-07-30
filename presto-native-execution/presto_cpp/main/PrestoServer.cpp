@@ -58,6 +58,12 @@
 #include "presto_cpp/main/RemoteFunctionRegisterer.h"
 #endif
 
+#ifdef __linux__
+// Required by BatchThreadFactory
+#include <pthread.h>
+#include <sched.h>
+#endif
+
 namespace facebook::presto {
 using namespace facebook::velox;
 
@@ -157,10 +163,6 @@ void PrestoServer::run() {
     // velox.properties is optional.
     baseVeloxQueryConfig->initialize(
         fmt::format("{}/velox.properties", configDirectoryPath_), true);
-
-    if (systemConfig->enableRuntimeMetricsCollection()) {
-      enableRuntimeMetricReporting();
-    }
 
     httpPort = systemConfig->httpServerHttpPort();
     if (systemConfig->httpServerHttpsEnabled()) {
@@ -280,6 +282,7 @@ void PrestoServer::run() {
         environment_,
         nodeId_,
         nodeLocation_,
+        systemConfig->prestoNativeSidecar(),
         catalogNames,
         systemConfig->announcementMaxFrequencyMs(),
         sslContext_);
@@ -365,6 +368,21 @@ void PrestoServer::run() {
             .sendWithEOM();
       });
 
+  if (systemConfig->enableRuntimeMetricsCollection()) {
+    enableWorkerStatsReporting();
+    if (folly::Singleton<velox::BaseStatsReporter>::try_get()) {
+      httpServer_->registerGet(
+          "/v1/info/metrics",
+          [](proxygen::HTTPMessage* /*message*/,
+             const std::vector<std::unique_ptr<folly::IOBuf>>& /*body*/,
+             proxygen::ResponseHandler* downstream) {
+            http::sendOkResponse(
+                downstream,
+                folly::Singleton<velox::BaseStatsReporter>::try_get()
+                    ->fetchMetrics());
+          });
+    }
+  }
   registerFunctions();
   registerRemoteFunctions();
   registerVectorSerdes();
@@ -374,18 +392,33 @@ void PrestoServer::run() {
       systemConfig->exchangeHttpClientNumIoThreadsHwMultiplier() *
           std::thread::hardware_concurrency(),
       1);
-  exchangeHttpExecutor_ = std::make_shared<folly::IOThreadPoolExecutor>(
+  exchangeHttpIoExecutor_ = std::make_shared<folly::IOThreadPoolExecutor>(
       numExchangeHttpClientIoThreads,
-      std::make_shared<folly::NamedThreadFactory>("PrestoWorkerNetwork"));
+      std::make_shared<folly::NamedThreadFactory>("ExchangeIO"));
 
   PRESTO_STARTUP_LOG(INFO) << "Exchange Http IO executor '"
-                           << exchangeHttpExecutor_->getName() << "' has "
-                           << exchangeHttpExecutor_->numThreads()
+                           << exchangeHttpIoExecutor_->getName() << "' has "
+                           << exchangeHttpIoExecutor_->numThreads()
+                           << " threads.";
+
+  const auto numExchangeHttpClientCpuThreads = std::max<size_t>(
+      systemConfig->exchangeHttpClientNumCpuThreadsHwMultiplier() *
+          std::thread::hardware_concurrency(),
+      1);
+
+  exchangeHttpCpuExecutor_ = std::make_shared<folly::CPUThreadPoolExecutor>(
+      numExchangeHttpClientCpuThreads,
+      std::make_shared<folly::NamedThreadFactory>("ExchangeCPU"));
+
+  PRESTO_STARTUP_LOG(INFO) << "Exchange Http CPU executor '"
+                           << exchangeHttpCpuExecutor_->getName() << "' has "
+                           << exchangeHttpCpuExecutor_->numThreads()
                            << " threads.";
 
   if (systemConfig->exchangeEnableConnectionPool()) {
     PRESTO_STARTUP_LOG(INFO) << "Enable exchange Http Client connection pool.";
-    exchangeSourceConnectionPools_ = std::make_unique<ConnectionPools>();
+    exchangeSourceConnectionPool_ =
+        std::make_unique<http::HttpClientConnectionPool>();
   }
 
   facebook::velox::exec::ExchangeSource::registerFactory(
@@ -399,9 +432,9 @@ void PrestoServer::run() {
             destination,
             queue,
             pool,
-            driverExecutor_.get(),
-            exchangeHttpExecutor_.get(),
-            exchangeSourceConnectionPools_.get(),
+            exchangeHttpCpuExecutor_.get(),
+            exchangeHttpIoExecutor_.get(),
+            exchangeSourceConnectionPool_.get(),
             sslContext_);
       });
 
@@ -540,7 +573,9 @@ void PrestoServer::run() {
       << "': threads: " << driverExecutor_->numActiveThreads() << "/"
       << driverExecutor_->numThreads()
       << ", task queue: " << driverExecutor_->getTaskQueueSize();
-  driverExecutor_->join();
+  // Schedule release of SessionPools held by HttpClients before the exchange
+  // HTTP executor threads are joined.
+  driverExecutor_.reset();
 
   if (connectorIoExecutor_) {
     PRESTO_SHUTDOWN_LOG(INFO)
@@ -550,9 +585,9 @@ void PrestoServer::run() {
     connectorIoExecutor_->join();
   }
 
-  if (exchangeSourceConnectionPools_) {
+  if (exchangeSourceConnectionPool_) {
     PRESTO_SHUTDOWN_LOG(INFO) << "Releasing exchange HTTP connection pools";
-    exchangeSourceConnectionPools_->destroy();
+    exchangeSourceConnectionPool_->destroy();
   }
 
   if (httpSrvCpuExecutor_ != nullptr) {
@@ -574,10 +609,17 @@ void PrestoServer::run() {
 
   PRESTO_SHUTDOWN_LOG(INFO)
       << "Joining Exchange Http IO executor '"
-      << exchangeHttpExecutor_->getName()
-      << "': threads: " << exchangeHttpExecutor_->numActiveThreads() << "/"
-      << exchangeHttpExecutor_->numThreads();
-  exchangeHttpExecutor_->join();
+      << exchangeHttpIoExecutor_->getName()
+      << "': threads: " << exchangeHttpIoExecutor_->numActiveThreads() << "/"
+      << exchangeHttpIoExecutor_->numThreads();
+  exchangeHttpIoExecutor_->join();
+
+  PRESTO_SHUTDOWN_LOG(INFO)
+      << "Joining Exchange Http CPU executor '"
+      << exchangeHttpCpuExecutor_->getName()
+      << "': threads: " << exchangeHttpCpuExecutor_->numActiveThreads() << "/"
+      << exchangeHttpCpuExecutor_->numThreads();
+  exchangeHttpCpuExecutor_->join();
 
   PRESTO_SHUTDOWN_LOG(INFO) << "Done joining our executors.";
 
@@ -622,15 +664,47 @@ void PrestoServer::yieldTasks() {
   }
 }
 
+#ifdef __linux__
+class BatchThreadFactory : public folly::NamedThreadFactory {
+ public:
+  explicit BatchThreadFactory(const std::string& name)
+      : NamedThreadFactory{name} {}
+
+  std::thread newThread(folly::Func&& func) override {
+    return folly::NamedThreadFactory::newThread([_func = std::move(
+                                                     func)]() mutable {
+      sched_param param;
+      param.sched_priority = 0;
+      const int ret =
+          pthread_setschedparam(pthread_self(), SCHED_BATCH, &param);
+      VELOX_CHECK_EQ(
+          ret, 0, "Failed to set a thread priority: {}", folly::errnoStr(ret));
+      _func();
+    });
+  }
+};
+#endif
+
 void PrestoServer::initializeThreadPools() {
   const auto hwConcurrency = std::thread::hardware_concurrency();
   auto* systemConfig = SystemConfig::instance();
 
   const auto numDriverCpuThreads = std::max<size_t>(
       systemConfig->driverNumCpuThreadsHwMultiplier() * hwConcurrency, 1);
+
+  std::shared_ptr<folly::NamedThreadFactory> threadFactory;
+  if (systemConfig->driverThreadsBatchSchedulingEnabled()) {
+#ifdef __linux__
+    threadFactory = std::make_shared<BatchThreadFactory>("Driver");
+#else
+    VELOX_FAIL("Batch scheduling policy can only be enabled on Linux")
+#endif
+  } else {
+    threadFactory = std::make_shared<folly::NamedThreadFactory>("Driver");
+  }
+
   driverExecutor_ = std::make_shared<folly::CPUThreadPoolExecutor>(
-      numDriverCpuThreads,
-      std::make_shared<folly::NamedThreadFactory>("Driver"));
+      numDriverCpuThreads, threadFactory);
 
   const auto numIoThreads = std::max<size_t>(
       systemConfig->httpServerNumIoThreadsHwMultiplier() * hwConcurrency, 1);
@@ -711,6 +785,9 @@ void PrestoServer::initializeVeloxMemory() {
     options.memoryPoolTransferCapacity =
         systemConfig->memoryPoolTransferCapacity();
     options.memoryReclaimWaitMs = systemConfig->memoryReclaimWaitMs();
+    options.globalArbitrationEnabled =
+        systemConfig->memoryArbitratorGlobalArbitrationEnabled();
+    options.largestSizeClassPages = systemConfig->largestSizeClassPages();
     options.arbitrationStateCheckCb = velox::exec::memoryArbitrationStateCheck;
   }
   memory::initializeMemoryManager(options);
@@ -721,8 +798,13 @@ void PrestoServer::initializeVeloxMemory() {
     std::unique_ptr<cache::SsdCache> ssd = setupSsdCache();
     std::string cacheStr =
         ssd == nullptr ? "AsyncDataCache" : "AsyncDataCache with SSD";
+
+    cache::AsyncDataCache::Options cacheOptions{
+        systemConfig->asyncCacheMaxSsdWriteRatio(),
+        systemConfig->asyncCacheSsdSavableRatio(),
+        systemConfig->asyncCacheMinSsdSavableBytes()};
     cache_ = cache::AsyncDataCache::create(
-        memory::memoryManager()->allocator(), std::move(ssd));
+        memory::memoryManager()->allocator(), std::move(ssd), cacheOptions);
     cache::AsyncDataCache::setInstance(cache_.get());
     PRESTO_STARTUP_LOG(INFO) << cacheStr << " has been setup";
 
@@ -1105,7 +1187,7 @@ std::string PrestoServer::getBaseSpillDirectory() const {
   return SystemConfig::instance()->spillerSpillPath().value_or("");
 }
 
-void PrestoServer::enableRuntimeMetricReporting() {
+void PrestoServer::enableWorkerStatsReporting() {
   // This flag must be set to register the counters.
   facebook::velox::BaseStatsReporter::registered = true;
   registerStatsCounters();

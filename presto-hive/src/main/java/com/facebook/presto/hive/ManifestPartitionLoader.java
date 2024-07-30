@@ -48,6 +48,7 @@ import static com.facebook.presto.hive.HiveManifestUtils.decompressFileSizes;
 import static com.facebook.presto.hive.HiveSessionProperties.getMaxInitialSplitSize;
 import static com.facebook.presto.hive.HiveSessionProperties.getMaxSplitSize;
 import static com.facebook.presto.hive.HiveSessionProperties.isManifestVerificationEnabled;
+import static com.facebook.presto.hive.HiveSessionProperties.isSkipEmptyFilesEnabled;
 import static com.facebook.presto.hive.HiveUtil.buildDirectoryContextProperties;
 import static com.facebook.presto.hive.HiveUtil.getInputFormat;
 import static com.facebook.presto.hive.NestedDirectoryPolicy.IGNORED;
@@ -62,8 +63,8 @@ public class ManifestPartitionLoader
         extends PartitionLoader
 {
     // The following constants are referred from FileSystem.getFileBlockLocations in Hadoop
-    private static final String[] BLOCK_LOCATION_NAMES = new String[] {"localhost:50010"};
-    private static final String[] BLOCK_LOCATION_HOSTS = new String[] {"localhost"};
+    private static final String[] BLOCK_LOCATION_NAMES = {"localhost:50010"};
+    private static final String[] BLOCK_LOCATION_HOSTS = {"localhost"};
 
     private final Table table;
     private final Optional<Domain> pathDomain;
@@ -122,7 +123,7 @@ public class ManifestPartitionLoader
             Path filePath = new Path(path, fileNames.get(i));
             FileStatus fileStatus = new FileStatus(fileSizes.get(i), false, 1, getMaxSplitSize(session).toBytes(), 0, filePath);
             try {
-                BlockLocation[] locations = new BlockLocation[] {new BlockLocation(BLOCK_LOCATION_NAMES, BLOCK_LOCATION_HOSTS, 0, fileSizes.get(i))};
+                BlockLocation[] locations = {new BlockLocation(BLOCK_LOCATION_NAMES, BLOCK_LOCATION_HOSTS, 0, fileSizes.get(i))};
 
                 // It is safe to set extraFileContext as empty because downstream code always checks if its present before proceeding.
                 fileListBuilder.add(HiveFileInfo.createHiveFileInfo(new LocatedFileStatus(fileStatus, locations), Optional.empty()));
@@ -191,6 +192,7 @@ public class ManifestPartitionLoader
         HiveDirectoryContext hiveDirectoryContext = new HiveDirectoryContext(
                 recursiveDirWalkerEnabled ? RECURSE : IGNORED,
                 false,
+                isSkipEmptyFilesEnabled(session),
                 hdfsContext.getIdentity(),
                 buildDirectoryContextProperties(session),
                 session.getRuntimeStats());

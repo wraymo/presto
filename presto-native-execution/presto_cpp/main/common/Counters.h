@@ -46,9 +46,8 @@ constexpr folly::StringPiece kCounterHttpClientPrestoExchangeNumOnBody{
 /// PrestoExchangeSource.
 constexpr folly::StringPiece kCounterHttpClientPrestoExchangeOnBodyBytes{
     "presto_cpp.http.client.presto_exchange_source.on_body_bytes"};
-/// SerializedPage size in bytes from PrestoExchangeSource.
-constexpr folly::StringPiece kCounterPrestoExchangeSerializedPageSize{
-    "presto_cpp.presto_exchange_source.serialized_page_size"};
+constexpr folly::StringPiece kCounterHttpClientNumConnectionsCreated{
+    "presto_cpp.http.client.num_connections_created"};
 /// Peak number of bytes queued in PrestoExchangeSource waiting for consume.
 constexpr folly::StringPiece kCounterExchangeSourcePeakQueuedBytes{
     "presto_cpp.exchange_source_peak_queued_bytes"};

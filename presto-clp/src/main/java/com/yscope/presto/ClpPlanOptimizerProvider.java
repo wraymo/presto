@@ -13,12 +13,11 @@
  */
 package com.yscope.presto;
 
+import com.facebook.presto.common.type.TypeManager;
 import com.facebook.presto.spi.ConnectorPlanOptimizer;
 import com.facebook.presto.spi.connector.ConnectorPlanOptimizerProvider;
 import com.facebook.presto.spi.function.FunctionMetadataManager;
 import com.facebook.presto.spi.function.StandardFunctionResolution;
-import com.facebook.presto.spi.relation.DeterminismEvaluator;
-import com.facebook.presto.spi.relation.ExpressionOptimizer;
 import com.google.common.collect.ImmutableSet;
 
 import javax.inject.Inject;
@@ -30,19 +29,16 @@ public class ClpPlanOptimizerProvider
 {
     private final FunctionMetadataManager functionManager;
     private final StandardFunctionResolution functionResolution;
-    private final DeterminismEvaluator determinismEvaluator;
-    private final ExpressionOptimizer expressionOptimizer;
+    private final TypeManager typeManager;
 
     @Inject
     public ClpPlanOptimizerProvider(FunctionMetadataManager functionManager,
                                     StandardFunctionResolution functionResolution,
-                                    DeterminismEvaluator determinismEvaluator,
-                                    ExpressionOptimizer expressionOptimizer)
+                                    TypeManager typeManager)
     {
         this.functionManager = functionManager;
         this.functionResolution = functionResolution;
-        this.determinismEvaluator = determinismEvaluator;
-        this.expressionOptimizer = expressionOptimizer;
+        this.typeManager = typeManager;
     }
 
     @Override
@@ -54,9 +50,6 @@ public class ClpPlanOptimizerProvider
     @Override
     public Set<ConnectorPlanOptimizer> getPhysicalPlanOptimizers()
     {
-        return ImmutableSet.of(new ClpPlanOptimizer(functionManager,
-                functionResolution,
-                determinismEvaluator,
-                expressionOptimizer));
+        return ImmutableSet.of(new ClpPlanOptimizer(functionManager, functionResolution, typeManager));
     }
 }

@@ -15,6 +15,7 @@ package com.facebook.presto.sql.analyzer;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.SystemSessionProperties;
+import com.facebook.presto.cost.HistoryBasedOptimizationConfig;
 import com.facebook.presto.execution.QueryManagerConfig;
 import com.facebook.presto.execution.TaskManagerConfig;
 import com.facebook.presto.execution.scheduler.NodeSchedulerConfig;
@@ -22,7 +23,6 @@ import com.facebook.presto.execution.warnings.WarningCollectorConfig;
 import com.facebook.presto.memory.MemoryManagerConfig;
 import com.facebook.presto.memory.NodeMemoryConfig;
 import com.facebook.presto.metadata.SessionPropertyManager;
-import com.facebook.presto.server.security.SecurityConfig;
 import com.facebook.presto.spi.PrestoWarning;
 import com.facebook.presto.spi.StandardWarningCode;
 import com.facebook.presto.spi.WarningCollector;
@@ -86,6 +86,7 @@ import static com.facebook.presto.sql.analyzer.SemanticErrorCode.WINDOW_REQUIRES
 import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
 import static java.lang.String.format;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertThrows;
 import static org.testng.Assert.assertTrue;
 
 @Test(singleThreaded = true)
@@ -170,7 +171,7 @@ public class TestAnalyzer
                 new NodeSpillConfig(),
                 new TracingConfig(),
                 new CompilerConfig(),
-                new SecurityConfig()))).build();
+                new HistoryBasedOptimizationConfig()))).build();
         assertFails(session, WINDOW_FUNCTION_ORDERBY_LITERAL,
                 "SELECT SUM(x) OVER (PARTITION BY y ORDER BY 1) AS s\n" +
                         "FROM (values (1,10), (2, 10)) AS T(x, y)");
@@ -565,7 +566,7 @@ public class TestAnalyzer
                 new NodeSpillConfig(),
                 new TracingConfig(),
                 new CompilerConfig(),
-                new SecurityConfig()))).build();
+                new HistoryBasedOptimizationConfig()))).build();
         analyze(session, "SELECT a, b, c, d, e, f, g, h, i, j, k, SUM(l)" +
                 "FROM (VALUES (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))\n" +
                 "t (a, b, c, d, e, f, g, h, i, j, k, l)\n" +
@@ -844,6 +845,31 @@ public class TestAnalyzer
     public void testExplainAnalyze()
     {
         analyze("EXPLAIN ANALYZE SELECT * FROM t1");
+    }
+
+    @Test
+    public void testExplainAnalyzeFormatJson()
+    {
+        analyze("EXPLAIN ANALYZE (format JSON) SELECT * FROM t1");
+    }
+
+    public void testExplainAnalyzeFormatJsonHasStats()
+    {
+        analyze("EXPLAIN ANALYZE (format JSON) SELECT * FROM t1");
+    }
+
+    @Test
+    public void testExplainAnalyzeFormatJsonTypeDistributed()
+    {
+        analyze("EXPLAIN ANALYZE (format JSON, type DISTRIBUTED) SELECT * FROM t1");
+    }
+
+    @Test
+    public void testExplainAnalyzeIllegalArgs()
+    {
+        assertThrows(IllegalStateException.class, () -> analyze("EXPLAIN ANALYZE (type LOGICAL) SELECT * FROM t1"));
+        assertThrows(IllegalStateException.class, () -> analyze("EXPLAIN ANALYZE (format TEXT, type LOGICAL) SELECT * FROM t1"));
+        assertThrows(IllegalStateException.class, () -> analyze("EXPLAIN ANALYZE (format JSON, format TEXT) SELECT * FROM t1"));
     }
 
     @Test

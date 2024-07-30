@@ -10,7 +10,7 @@
 
     <groupId>com.facebook.presto</groupId>
     <artifactId>presto-root</artifactId>
-    <version>0.288-SNAPSHOT</version>
+    <version>0.289-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>presto-root</name>
@@ -55,7 +55,7 @@
         <dep.drift.version>1.38</dep.drift.version>
         <!-- Changing joda version changes tzdata which must match deployed JVM tzdata
              Do not change this without also making sure it matches -->
-        <dep.joda.version>2.12.5</dep.joda.version>
+        <dep.joda.version>2.12.7</dep.joda.version>
         <dep.tempto.version>1.53</dep.tempto.version>
         <dep.testng.version>7.5</dep.testng.version>
         <dep.assertj-core.version>3.8.0</dep.assertj-core.version>
@@ -63,7 +63,7 @@
         <dep.nexus-staging-plugin.version>1.6.8</dep.nexus-staging-plugin.version>
         <dep.asm.version>9.0</dep.asm.version>
         <dep.gcs.version>1.9.17</dep.gcs.version>
-        <dep.alluxio.version>312</dep.alluxio.version>
+        <dep.alluxio.version>313</dep.alluxio.version>
         <dep.slf4j.version>1.7.32</dep.slf4j.version>
         <dep.kafka.version>2.3.1</dep.kafka.version>
         <dep.pinot.version>0.11.0</dep.pinot.version>
@@ -901,7 +901,7 @@
             <dependency>
                 <groupId>io.airlift</groupId>
                 <artifactId>aircompressor</artifactId>
-                <version>0.21</version>
+                <version>0.27</version>
             </dependency>
 
             <dependency>
@@ -2278,7 +2278,7 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-shade-plugin</artifactId>
-                    <version>3.1.1</version>
+                    <version>3.6.0</version>
                 </plugin>
 
                 <plugin>
@@ -2496,7 +2496,9 @@
         <profile>
             <id>ui</id>
             <activation>
-                <activeByDefault>true</activeByDefault>
+                <property>
+                    <name>!skipUI</name>
+                </property>
             </activation>
             <modules>
                 <module>presto-ui</module>

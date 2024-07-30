@@ -170,7 +170,7 @@ class PrestoServer {
   virtual std::string getBaseSpillDirectory() const;
 
   /// Invoked to enable stats reporting and register counters.
-  virtual void enableRuntimeMetricReporting();
+  virtual void enableWorkerStatsReporting();
 
   /// Invoked to get the list of filters passed to the http server.
   std::vector<std::unique_ptr<proxygen::RequestHandlerFactory>>
@@ -215,7 +215,10 @@ class PrestoServer {
   std::unique_ptr<folly::IOThreadPoolExecutor> connectorIoExecutor_;
 
   // Executor for exchange data over http.
-  std::shared_ptr<folly::IOThreadPoolExecutor> exchangeHttpExecutor_;
+  std::shared_ptr<folly::IOThreadPoolExecutor> exchangeHttpIoExecutor_;
+
+  // Executor for exchange request processing.
+  std::shared_ptr<folly::CPUThreadPoolExecutor> exchangeHttpCpuExecutor_;
 
   // Executor for HTTP request dispatching
   std::shared_ptr<folly::IOThreadPoolExecutor> httpSrvIOExecutor_;
@@ -229,7 +232,7 @@ class PrestoServer {
   // Executor for spilling.
   std::shared_ptr<folly::CPUThreadPoolExecutor> spillerExecutor_;
 
-  std::unique_ptr<ConnectionPools> exchangeSourceConnectionPools_;
+  std::unique_ptr<http::HttpClientConnectionPool> exchangeSourceConnectionPool_;
 
   // If not null,  the instance of AsyncDataCache used for in-memory file cache.
   std::shared_ptr<velox::cache::AsyncDataCache> cache_;

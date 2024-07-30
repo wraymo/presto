@@ -15,6 +15,7 @@ package com.yscope.presto;
 
 import com.facebook.airlift.bootstrap.LifeCycleManager;
 import com.facebook.airlift.log.Logger;
+import com.facebook.presto.common.type.TypeManager;
 import com.facebook.presto.spi.connector.Connector;
 import com.facebook.presto.spi.connector.ConnectorMetadata;
 import com.facebook.presto.spi.connector.ConnectorPlanOptimizerProvider;
@@ -42,6 +43,7 @@ public class ClpConnector
     private final FunctionMetadataManager functionManager;
     private final StandardFunctionResolution functionResolution;
     private final RowExpressionService rowExpressionService;
+    private final TypeManager typeManager;
 
     @Inject
     public ClpConnector(LifeCycleManager lifeCycleManager,
@@ -50,7 +52,8 @@ public class ClpConnector
                         ClpRecordSetProvider recordSetProvider,
                         FunctionMetadataManager functionManager,
                         StandardFunctionResolution functionResolution,
-                        RowExpressionService rowExpressionService)
+                        RowExpressionService rowExpressionService,
+                        TypeManager typeManager)
     {
         this.lifeCycleManager = requireNonNull(lifeCycleManager, "lifeCycleManager is null");
         this.metadata = requireNonNull(metadata, "metadata is null");
@@ -59,15 +62,13 @@ public class ClpConnector
         this.functionManager = requireNonNull(functionManager, "functionManager is null");
         this.functionResolution = requireNonNull(functionResolution, "functionResolution is null");
         this.rowExpressionService = requireNonNull(rowExpressionService, "rowExpressionService is null");
+        this.typeManager = requireNonNull(typeManager, "typeManager is null");
     }
 
     @Override
     public ConnectorPlanOptimizerProvider getConnectorPlanOptimizerProvider()
     {
-        return new ClpPlanOptimizerProvider(functionManager,
-                functionResolution,
-                rowExpressionService.getDeterminismEvaluator(),
-                rowExpressionService.getExpressionOptimizer());
+        return new ClpPlanOptimizerProvider(functionManager, functionResolution, typeManager);
     }
 
     @Override

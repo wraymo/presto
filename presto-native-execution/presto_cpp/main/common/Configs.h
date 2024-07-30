@@ -222,6 +222,11 @@ class SystemConfig : public ConfigBase {
   static constexpr std::string_view kDriverNumCpuThreadsHwMultiplier{
       "driver.num-cpu-threads-hw-multiplier"};
 
+  /// Run driver threads with the SCHED_BATCH scheduling policy. Linux only.
+  /// https://man7.org/linux/man-pages/man7/sched.7.html
+  static constexpr std::string_view kDriverThreadsBatchSchedulingEnabled{
+      "driver.threads-batch-scheduling-enabled"};
+
   /// Time duration threshold used to detect if an operator call in driver is
   /// stuck or not.  If any of the driver thread is detected as stuck by this
   /// standard, we take the worker offline and further investigation on the
@@ -248,21 +253,23 @@ class SystemConfig : public ConfigBase {
   /// Memory allocation limit enforced via internal memory allocator.
   static constexpr std::string_view kSystemMemoryGb{"system-memory-gb"};
 
-  /// Specifies the total memory capacity that can be used by query execution in
-  /// GB. The query memory capacity should be configured less than the system
-  /// memory capacity ('system-memory-gb') to reserve memory for system usage
-  /// such as disk spilling and cache prefetch which are not counted in query
-  /// memory usage.
+  /// Indicates if the process is configured as a sidecar.
+  static constexpr std::string_view kNativeSidecar{"native-sidecar"};
+
+  /// Specifies the total amount of memory in GB that the queries can use on a
+  /// single worker node. It should be configured to be less than the total
+  /// system memory capacity ('system-memory-gb') such that there is enough room
+  /// left for the system (as opposed to for the queries), such as disk spilling
+  /// and cache prefetch.
   ///
   /// NOTE: the query memory capacity is enforced by memory arbitrator so that
   /// this config only applies if the memory arbitration has been enabled.
   static constexpr std::string_view kQueryMemoryGb{"query-memory-gb"};
 
-  /// Specifies the amount of query memory capacity reserved to ensure that each
-  /// query has minimal memory capacity to run. A query can only allocate from
-  /// the reserved query memory if its current capacity is less than the minimal
-  /// memory capacity as specified by 'memory-pool-reserved-capacity'. The
-  /// exceeding capacity has to allocate from the non-reserved query memory.
+  /// Specifies the total amount of memory in GB reserved for the queries on
+  /// a single worker node. A query can only allocate from this reserved space
+  /// if 1) the non-reserved space in "query-memory-gb" is used up; and 2) the
+  /// amount it tries to get is less than 'memory-pool-reserved-capacity'.
   ///
   /// NOTE: the reserved query memory capacity is enforced by memory arbitrator
   /// so that this config only applies if the memory arbitration has been
@@ -315,6 +322,25 @@ class SystemConfig : public ConfigBase {
       "async-cache-ssd-checkpoint-gb"};
   static constexpr std::string_view kAsyncCacheSsdPath{"async-cache-ssd-path"};
 
+  /// The max ratio of the number of in-memory cache entries being written to
+  /// SSD cache over the total number of cache entries. This is to control SSD
+  /// cache write rate, and once the ratio exceeds this threshold, then we
+  /// stop writing to SSD cache.
+  static constexpr std::string_view kAsyncCacheMaxSsdWriteRatio{
+      "async-cache-max-ssd-write-ratio"};
+
+  /// The min ratio of SSD savable (in-memory) cache space over the total
+  /// cache space. Once the ratio exceeds this limit, we start writing SSD
+  /// savable cache entries into SSD cache.
+  static constexpr std::string_view kAsyncCacheSsdSavableRatio{
+      "async-cache-ssd-savable-ratio"};
+
+  /// Min SSD savable (in-memory) cache space to start writing SSD savable
+  /// cache entries into SSD cache.
+  /// NOTE: we only write to SSD cache when both above conditions are satisfied.
+  static constexpr std::string_view kAsyncCacheMinSsdSavableBytes{
+      "async-cache-min-ssd-savable-bytes"};
+
   /// In file systems, such as btrfs, supporting cow (copy on write), the ssd
   /// cache can use all ssd space and stop working. To prevent that, use this
   /// option to disable cow for cache files.
@@ -343,6 +369,12 @@ class SystemConfig : public ConfigBase {
       "cache.velox.ttl-check-interval"};
   static constexpr std::string_view kUseMmapAllocator{"use-mmap-allocator"};
 
+  /// Number of pages in largest size class in MallocAllocator. This is used to
+  /// optimize MmapAllocator performance for query workloads with large memory
+  /// allocation size.
+  static constexpr std::string_view kLargestSizeClassPages{
+      "largest-size-class-pages"};
+
   static constexpr std::string_view kEnableRuntimeMetricsCollection{
       "runtime-metrics-collection-enabled"};
 
@@ -351,14 +383,21 @@ class SystemConfig : public ConfigBase {
   static constexpr std::string_view kMemoryArbitratorKind{
       "memory-arbitrator-kind"};
 
+  /// If true, it allows memory arbitrator to reclaim used memory cross query
+  /// memory pools.
+  static constexpr std::string_view kMemoryArbitratorGlobalArbitrationEnabled{
+      "memory-arbitrator-global-arbitration-enabled"};
+
   /// The initial memory pool capacity in bytes allocated on creation.
   ///
   /// NOTE: this config only applies if the memory arbitration has been enabled.
   static constexpr std::string_view kMemoryPoolInitCapacity{
       "memory-pool-init-capacity"};
 
-  /// The minimal amount of memory capacity in bytes reserved for each query
-  /// memory pool.
+  /// The amount of memory in bytes reserved for each query memory pool. When
+  /// a query tries to allocate memory from the reserved space whose size is
+  /// specified by 'query-reserved-memory-gb', it cannot allocate more than the
+  /// value specified in 'memory-pool-reserved-capacity'.
   static constexpr std::string_view kMemoryPoolReservedCapacity{
       "memory-pool-reserved-capacity"};
 
@@ -441,9 +480,17 @@ class SystemConfig : public ConfigBase {
   static constexpr std::string_view kExchangeMaxErrorDuration{
       "exchange.max-error-duration"};
 
+  /// If true, copy proxygen iobufs to velox memory pool, otherwise not. The
+  /// presto exchange source builds the serialized presto page from proxygen
+  /// iobufs directly.
+  static constexpr std::string_view kExchangeEnableBufferCopy{
+      "exchange.enable-buffer-copy"};
+
   /// Enable to make immediate buffer memory transfer in the handling IO threads
   /// as soon as exchange gets its response back. Otherwise the memory transfer
   /// will happen later in driver thread pool.
+  ///
+  /// NOTE: this only applies if 'exchange.no-buffer-copy' is false.
   static constexpr std::string_view kExchangeImmediateBufferTransfer{
       "exchange.immediate-buffer-transfer"};
 
@@ -466,6 +513,13 @@ class SystemConfig : public ConfigBase {
   /// 1.0 is default.
   static constexpr std::string_view kExchangeHttpClientNumIoThreadsHwMultiplier{
       "exchange.http-client.num-io-threads-hw-multiplier"};
+
+  /// Floating point number used in calculating how many threads we would use
+  /// for Exchange HTTP client CPU executor: hw_concurrency x multiplier.
+  /// 1.0 is default.
+  static constexpr std::string_view
+      kExchangeHttpClientNumCpuThreadsHwMultiplier{
+          "exchange.http-client.num-cpu-threads-hw-multiplier"};
 
   /// The maximum timeslice for a task on thread if there are threads queued.
   static constexpr std::string_view kTaskRunTimeSliceMicros{
@@ -589,9 +643,13 @@ class SystemConfig : public ConfigBase {
 
   double exchangeHttpClientNumIoThreadsHwMultiplier() const;
 
+  double exchangeHttpClientNumCpuThreadsHwMultiplier() const;
+
   double connectorNumIoThreadsHwMultiplier() const;
 
   double driverNumCpuThreadsHwMultiplier() const;
+
+  bool driverThreadsBatchSchedulingEnabled() const;
 
   size_t driverStuckOperatorThresholdMs() const;
 
@@ -631,6 +689,12 @@ class SystemConfig : public ConfigBase {
 
   std::string asyncCacheSsdPath() const;
 
+  double asyncCacheMaxSsdWriteRatio() const;
+
+  double asyncCacheSsdSavableRatio() const;
+
+  int32_t asyncCacheMinSsdSavableBytes() const;
+
   bool asyncCacheSsdDisableFileCow() const;
 
   bool ssdCacheChecksumEnabled() const;
@@ -648,6 +712,8 @@ class SystemConfig : public ConfigBase {
   bool useMmapAllocator() const;
 
   std::string memoryArbitratorKind() const;
+
+  bool memoryArbitratorGlobalArbitrationEnabled() const;
 
   int32_t queryMemoryGb() const;
 
@@ -697,6 +763,8 @@ class SystemConfig : public ConfigBase {
 
   bool exchangeEnableConnectionPool() const;
 
+  bool exchangeEnableBufferCopy() const;
+
   bool exchangeImmediateBufferTransfer() const;
 
   int32_t taskRunTimeSliceMicros() const;
@@ -721,7 +789,11 @@ class SystemConfig : public ConfigBase {
 
   std::chrono::duration<double> cacheVeloxTtlCheckInterval() const;
 
+  int32_t largestSizeClassPages() const;
+
   bool enableRuntimeMetricsCollection() const;
+
+  bool prestoNativeSidecar() const;
 };
 
 /// Provides access to node properties defined in node.properties file.

@@ -13,6 +13,7 @@
  */
 package com.yscope.presto;
 
+import com.facebook.presto.common.block.BlockBuilder;
 import com.facebook.airlift.log.Logger;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.spi.RecordCursor;
@@ -150,24 +151,23 @@ public class ClpRecordCursor
     @Override
     public Slice getSlice(int field)
     {
-        long startTs = System.currentTimeMillis();
         checkFieldType(field, createUnboundedVarcharType());
         JsonNode node = fields.get(field);
-        Slice result;
-        if (node.isArray()) {
-            result = Slices.utf8Slice(node.toString());
-        }
-        else {
-            result = Slices.utf8Slice(node.asText());
-        }
-        long endTs = System.currentTimeMillis();
-        getFieldTime += endTs - startTs;
-        return result;
+        return Slices.utf8Slice(node.asText());
     }
 
     @Override
     public Object getObject(int field)
     {
+        JsonNode node = fields.get(field);
+        if (node.isArray()) {
+            BlockBuilder builder = VARCHAR.createBlockBuilder(null, node.size());
+            Iterator<JsonNode> elements = node.elements();
+            while (elements.hasNext()) {
+                VARCHAR.writeString(builder, elements.next().asText());
+            }
+            return builder.build();
+        }
         throw new UnsupportedOperationException();
     }
 

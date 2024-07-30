@@ -15,8 +15,10 @@ package com.yscope.presto;
 
 import com.facebook.presto.common.type.BigintType;
 import com.facebook.presto.metadata.FunctionAndTypeManager;
+import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.relation.CallExpression;
 import com.facebook.presto.spi.relation.VariableReferenceExpression;
+import com.facebook.presto.sql.relational.FunctionResolution;
 import com.google.common.collect.ImmutableList;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -24,6 +26,7 @@ import org.testng.annotations.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static com.facebook.presto.common.function.OperatorType.EQUAL;
@@ -127,12 +130,19 @@ public class TestClpRecordCursor
                                         "a_bigint",
                                         BigintType.BIGINT),
                                 constant(1L, BigintType.BIGINT)));
-        String query = ClpPlanOptimizer.buildKqlQuery(callExpression);
+        Map<VariableReferenceExpression, ColumnHandle> assignments = Map.of(
+                new VariableReferenceExpression(Optional.empty(), "a_bigint", BigintType.BIGINT),
+                new ClpColumnHandle("a_bigint", BigintType.BIGINT, false));
+        Optional<String> query =
+                callExpression.accept(new ClpFilterToKqlConverter(
+                        new FunctionResolution(functionAndTypeManager.getFunctionAndTypeResolver()),
+                        functionAndTypeManager, functionAndTypeManager, assignments), null).getDefinition();
+        assertTrue(query.isPresent());
         ClpRecordSetProvider recordSetProvider = new ClpRecordSetProvider(clpClient);
         ClpRecordSet recordSet = (ClpRecordSet) recordSetProvider.getRecordSet(
                 ClpTransactionHandle.INSTANCE,
                 SESSION,
-                new ClpSplit("default", "test_1_table", Optional.of(query)),
+                new ClpSplit("default", "test_1_table", query),
                 new ArrayList<>(clpClient.listColumns("test_1_table")));
         assertNotNull(recordSet, "recordSet is null");
         ClpRecordCursor cursor = (ClpRecordCursor) recordSet.cursor();

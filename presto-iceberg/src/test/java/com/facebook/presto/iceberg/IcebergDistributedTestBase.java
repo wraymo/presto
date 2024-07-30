@@ -94,7 +94,9 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static com.facebook.presto.SystemSessionProperties.ITERATIVE_OPTIMIZER_TIMEOUT;
 import static com.facebook.presto.SystemSessionProperties.LEGACY_TIMESTAMP;
+import static com.facebook.presto.SystemSessionProperties.OPTIMIZER_USE_HISTOGRAMS;
 import static com.facebook.presto.common.type.BigintType.BIGINT;
 import static com.facebook.presto.common.type.IntegerType.INTEGER;
 import static com.facebook.presto.common.type.TimeZoneKey.UTC_KEY;
@@ -103,8 +105,7 @@ import static com.facebook.presto.hive.BaseHiveColumnHandle.ColumnType.SYNTHESIZ
 import static com.facebook.presto.iceberg.FileContent.EQUALITY_DELETES;
 import static com.facebook.presto.iceberg.FileContent.POSITION_DELETES;
 import static com.facebook.presto.iceberg.IcebergQueryRunner.ICEBERG_CATALOG;
-import static com.facebook.presto.iceberg.IcebergQueryRunner.TEST_CATALOG_DIRECTORY;
-import static com.facebook.presto.iceberg.IcebergQueryRunner.TEST_DATA_DIRECTORY;
+import static com.facebook.presto.iceberg.IcebergQueryRunner.getIcebergDataDirectoryPath;
 import static com.facebook.presto.iceberg.IcebergSessionProperties.DELETE_AS_JOIN_REWRITE_ENABLED;
 import static com.facebook.presto.iceberg.IcebergSessionProperties.STATISTIC_SNAPSHOT_RECORD_DIFFERENCE_WEIGHT;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
@@ -116,6 +117,8 @@ import static com.facebook.presto.testing.assertions.Assert.assertEquals;
 import static com.facebook.presto.tests.sql.TestTable.randomTableSuffix;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.joining;
+import static java.util.stream.IntStream.range;
 import static org.apache.iceberg.SnapshotSummary.TOTAL_DATA_FILES_PROP;
 import static org.apache.iceberg.SnapshotSummary.TOTAL_DELETE_FILES_PROP;
 import static org.testng.Assert.assertNotEquals;
@@ -690,6 +693,59 @@ public abstract class IcebergDistributedTestBase
     {
     }
 
+    /**
+     * Increased the optimizer timeout from 15000ms to 25000ms
+     */
+    @Override
+    public void testLargeIn()
+    {
+        String longValues = range(0, 5000)
+                .mapToObj(Integer::toString)
+                .collect(joining(", "));
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ITERATIVE_OPTIMIZER_TIMEOUT, "25000ms")
+                .build();
+        assertQuery(session, "SELECT orderkey FROM orders WHERE orderkey IN (" + longValues + ")");
+        assertQuery(session, "SELECT orderkey FROM orders WHERE orderkey NOT IN (" + longValues + ")");
+
+        assertQuery(session, "SELECT orderkey FROM orders WHERE orderkey IN (mod(1000, orderkey), " + longValues + ")");
+        assertQuery(session, "SELECT orderkey FROM orders WHERE orderkey NOT IN (mod(1000, orderkey), " + longValues + ")");
+
+        String varcharValues = range(0, 5000)
+                .mapToObj(i -> "'" + i + "'")
+                .collect(joining(", "));
+        assertQuery(session, "SELECT orderkey FROM orders WHERE cast(orderkey AS VARCHAR) IN (" + varcharValues + ")");
+        assertQuery(session, "SELECT orderkey FROM orders WHERE cast(orderkey AS VARCHAR) NOT IN (" + varcharValues + ")");
+
+        String arrayValues = range(0, 5000)
+                .mapToObj(i -> format("ARRAY[%s, %s, %s]", i, i + 1, i + 2))
+                .collect(joining(", "));
+        assertQuery(session, "SELECT ARRAY[0, 0, 0] in (ARRAY[0, 0, 0], " + arrayValues + ")", "values true");
+        assertQuery(session, "SELECT ARRAY[0, 0, 0] in (" + arrayValues + ")", "values false");
+    }
+
+    /**
+     * Increased the optimizer timeouts from 30000ms and 20000ms to 40000ms and 30000ms respectively
+     */
+    @Override
+    public void testLargeInWithHistograms()
+    {
+        String longValues = range(0, 10_000)
+                .mapToObj(Integer::toString)
+                .collect(joining(", "));
+        String query = "select orderpriority, sum(totalprice) from lineitem join orders on lineitem.orderkey = orders.orderkey where orders.orderkey in (" + longValues + ") group by 1";
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ITERATIVE_OPTIMIZER_TIMEOUT, "40000ms")
+                .setSystemProperty(OPTIMIZER_USE_HISTOGRAMS, "true")
+                .build();
+        assertQuerySucceeds(session, query);
+        session = Session.builder(getSession())
+                .setSystemProperty(ITERATIVE_OPTIMIZER_TIMEOUT, "30000ms")
+                .setSystemProperty(OPTIMIZER_USE_HISTOGRAMS, "false")
+                .build();
+        assertQuerySucceeds(session, query);
+    }
+
     @Override
     @Test
     public void testStringFilters()
@@ -885,7 +941,6 @@ public abstract class IcebergDistributedTestBase
             // assert either case as we don't have good control over the timing of when statistics files are written
             ColumnStatistics col0Stats = columnStatsFor(statistics, "col0");
             ColumnStatistics col1Stats = columnStatsFor(statistics, "col1");
-            System.out.printf("distinct @ %s count col0: %s%n", snaps.get(i), col0Stats.getDistinctValuesCount());
             final int idx = i;
             assertEither(
                     () -> assertEquals(col0Stats.getDistinctValuesCount(), Estimate.of(idx)),
@@ -1538,7 +1593,8 @@ public abstract class IcebergDistributedTestBase
     private void writePositionDeleteToNationTable(Table icebergTable, String dataFilePath, long deletePos)
             throws IOException
     {
-        File metastoreDir = getDistributedQueryRunner().getCoordinator().getDataDirectory().toFile();
+        Path dataDirectory = getDistributedQueryRunner().getCoordinator().getDataDirectory();
+        File metastoreDir = getIcebergDataDirectoryPath(dataDirectory, catalogType.name(), new IcebergConfig().getFileFormat(), false).toFile();
         org.apache.hadoop.fs.Path metadataDir = new org.apache.hadoop.fs.Path(metastoreDir.toURI());
         String deleteFileName = "delete_file_" + UUID.randomUUID();
         FileSystem fs = getHdfsEnvironment().getFileSystem(new HdfsContext(SESSION), metadataDir);
@@ -1569,7 +1625,8 @@ public abstract class IcebergDistributedTestBase
     private void writeEqualityDeleteToNationTable(Table icebergTable, Map<String, Object> overwriteValues, Map<String, Object> partitionValues)
             throws Exception
     {
-        File metastoreDir = getDistributedQueryRunner().getCoordinator().getDataDirectory().toFile();
+        Path dataDirectory = getDistributedQueryRunner().getCoordinator().getDataDirectory();
+        File metastoreDir = getIcebergDataDirectoryPath(dataDirectory, catalogType.name(), new IcebergConfig().getFileFormat(), false).toFile();
         org.apache.hadoop.fs.Path metadataDir = new org.apache.hadoop.fs.Path(metastoreDir.toURI());
         String deleteFileName = "delete_file_" + UUID.randomUUID();
         FileSystem fs = getHdfsEnvironment().getFileSystem(new HdfsContext(SESSION), metadataDir);
@@ -1632,14 +1689,9 @@ public abstract class IcebergDistributedTestBase
         Path dataDirectory = getDistributedQueryRunner().getCoordinator().getDataDirectory();
         switch (catalogType) {
             case HIVE:
-                return dataDirectory
-                        .resolve(TEST_DATA_DIRECTORY)
-                        .getParent()
-                        .resolve(TEST_CATALOG_DIRECTORY)
-                        .toFile();
             case HADOOP:
             case NESSIE:
-                return dataDirectory.toFile();
+                return getIcebergDataDirectoryPath(dataDirectory, catalogType.name(), new IcebergConfig().getFileFormat(), false).toFile();
         }
 
         throw new PrestoException(NOT_SUPPORTED, "Unsupported Presto Iceberg catalog type " + catalogType);

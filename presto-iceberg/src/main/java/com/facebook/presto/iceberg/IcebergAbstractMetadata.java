@@ -46,6 +46,8 @@ import com.facebook.presto.spi.TableNotFoundException;
 import com.facebook.presto.spi.connector.ConnectorMetadata;
 import com.facebook.presto.spi.connector.ConnectorOutputMetadata;
 import com.facebook.presto.spi.connector.ConnectorTableVersion;
+import com.facebook.presto.spi.connector.ConnectorTableVersion.VersionOperator;
+import com.facebook.presto.spi.connector.ConnectorTableVersion.VersionType;
 import com.facebook.presto.spi.function.StandardFunctionResolution;
 import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.relation.RowExpressionService;
@@ -128,7 +130,7 @@ import static com.facebook.presto.iceberg.IcebergUtil.getPartitionFields;
 import static com.facebook.presto.iceberg.IcebergUtil.getPartitionKeyColumnHandles;
 import static com.facebook.presto.iceberg.IcebergUtil.getPartitionSpecsIncludingValidData;
 import static com.facebook.presto.iceberg.IcebergUtil.getPartitions;
-import static com.facebook.presto.iceberg.IcebergUtil.getSnapshotIdAsOfTime;
+import static com.facebook.presto.iceberg.IcebergUtil.getSnapshotIdTimeOperator;
 import static com.facebook.presto.iceberg.IcebergUtil.getTableComment;
 import static com.facebook.presto.iceberg.IcebergUtil.resolveSnapshotIdByName;
 import static com.facebook.presto.iceberg.IcebergUtil.toHiveColumns;
@@ -136,6 +138,7 @@ import static com.facebook.presto.iceberg.IcebergUtil.tryGetLocation;
 import static com.facebook.presto.iceberg.IcebergUtil.tryGetProperties;
 import static com.facebook.presto.iceberg.IcebergUtil.tryGetSchema;
 import static com.facebook.presto.iceberg.IcebergUtil.validateTableMode;
+import static com.facebook.presto.iceberg.IcebergUtil.verifyTypeSupported;
 import static com.facebook.presto.iceberg.PartitionFields.getPartitionColumnName;
 import static com.facebook.presto.iceberg.PartitionFields.getTransformTerm;
 import static com.facebook.presto.iceberg.PartitionFields.toPartitionFields;
@@ -144,6 +147,7 @@ import static com.facebook.presto.iceberg.TypeConverter.toIcebergType;
 import static com.facebook.presto.iceberg.TypeConverter.toPrestoType;
 import static com.facebook.presto.iceberg.changelog.ChangelogUtil.getRowTypeFromColumnMeta;
 import static com.facebook.presto.iceberg.optimizer.IcebergPlanOptimizer.getEnforcedColumns;
+import static com.facebook.presto.iceberg.util.StatisticsUtil.combineSelectedAndPredicateColumns;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.spi.statistics.TableStatisticType.ROW_COUNT;
 import static com.google.common.base.Verify.verify;
@@ -672,6 +676,8 @@ public abstract class IcebergAbstractMetadata
         Table icebergTable = getIcebergTable(session, table.getSchemaTableName());
         validateTableMode(session, icebergTable);
 
+        verifyTypeSupported(icebergTable.schema());
+
         return beginIcebergTableInsert(table, icebergTable);
     }
 
@@ -704,12 +710,17 @@ public abstract class IcebergAbstractMetadata
     {
         IcebergTableHandle handle = (IcebergTableHandle) tableHandle;
         Table icebergTable = getIcebergTable(session, handle.getSchemaTableName());
+
+        List<IcebergColumnHandle> handles = combineSelectedAndPredicateColumns(
+                columnHandles.stream()
+                        .map(IcebergColumnHandle.class::cast)
+                        .collect(toImmutableList()),
+                tableLayoutHandle.map(IcebergTableLayoutHandle.class::cast));
         return TableStatisticsMaker.getTableStatistics(session, typeManager,
                 tableLayoutHandle
                         .map(IcebergTableLayoutHandle.class::cast)
                         .map(IcebergTableLayoutHandle::getValidPredicate),
-                constraint, handle, icebergTable,
-                columnHandles.stream().map(IcebergColumnHandle.class::cast).collect(Collectors.toList()));
+                constraint, handle, icebergTable, handles);
     }
 
     @Override
@@ -946,20 +957,25 @@ public abstract class IcebergAbstractMetadata
 
     private static long getSnapshotIdForTableVersion(Table table, ConnectorTableVersion tableVersion)
     {
-        if (tableVersion.getVersionType() == ConnectorTableVersion.VersionType.TIMESTAMP) {
+        if (tableVersion.getVersionType() == VersionType.TIMESTAMP) {
             if (tableVersion.getVersionExpressionType() instanceof TimestampWithTimeZoneType) {
                 long millisUtc = new SqlTimestampWithTimeZone((long) tableVersion.getTableVersion()).getMillisUtc();
-                return getSnapshotIdAsOfTime(table, millisUtc);
+                return getSnapshotIdTimeOperator(table, millisUtc, tableVersion.getVersionOperator());
             }
             throw new PrestoException(NOT_SUPPORTED, "Unsupported table version expression type: " + tableVersion.getVersionExpressionType());
         }
-        if (tableVersion.getVersionType() == ConnectorTableVersion.VersionType.VERSION) {
+        if (tableVersion.getVersionType() == VersionType.VERSION) {
             if (tableVersion.getVersionExpressionType() instanceof BigintType) {
                 long snapshotId = (long) tableVersion.getTableVersion();
                 if (table.snapshot(snapshotId) == null) {
                     throw new PrestoException(ICEBERG_INVALID_SNAPSHOT_ID, "Iceberg snapshot ID does not exists: " + snapshotId);
                 }
-                return snapshotId;
+                if (tableVersion.getVersionOperator() == VersionOperator.EQUAL) { // AS OF Case
+                    return snapshotId;
+                }
+                else { // BEFORE Case
+                    return getSnapshotIdTimeOperator(table, table.snapshot(snapshotId).timestampMillis(), VersionOperator.LESS_THAN);
+                }
             }
             throw new PrestoException(NOT_SUPPORTED, "Unsupported table version expression type: " + tableVersion.getVersionExpressionType());
         }

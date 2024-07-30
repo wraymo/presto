@@ -105,7 +105,7 @@ public interface ConnectorMetadata
 
     /**
      * Returns the system table for the specified table name, if one exists.
-     * The system tables handled via {@link #getSystemTable} differ form those returned by {@link Connector#getSystemTables()}.
+     * The system tables handled via this method differ from those returned by {@link Connector#getSystemTables()}.
      * The former mechanism allows dynamic resolution of system tables, while the latter is
      * based on static list of system tables built during startup.
      */
@@ -229,15 +229,6 @@ public interface ConnectorMetadata
     {
         throw new PrestoException(NOT_SUPPORTED, "This connector does not support custom partitioning");
     }
-
-    /**
-     * Provides partitioning handle for CTE Materialization.
-     */
-    default ConnectorPartitioningHandle getPartitioningHandleForCteMaterialization(ConnectorSession session, int partitionCount, List<Type> partitionTypes)
-    {
-        throw new PrestoException(NOT_SUPPORTED, "This connector does not support custom partitioning");
-    }
-
     /**
      * Return the metadata for the specified table handle.
      *

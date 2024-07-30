@@ -55,6 +55,7 @@ import static com.facebook.presto.SystemSessionProperties.ENABLE_INTERMEDIATE_AG
 import static com.facebook.presto.SystemSessionProperties.FIELD_NAMES_IN_JSON_CAST_ENABLED;
 import static com.facebook.presto.SystemSessionProperties.GENERATE_DOMAIN_FILTERS;
 import static com.facebook.presto.SystemSessionProperties.HASH_PARTITION_COUNT;
+import static com.facebook.presto.SystemSessionProperties.ITERATIVE_OPTIMIZER_TIMEOUT;
 import static com.facebook.presto.SystemSessionProperties.JOIN_PREFILTER_BUILD_SIDE;
 import static com.facebook.presto.SystemSessionProperties.KEY_BASED_SAMPLING_ENABLED;
 import static com.facebook.presto.SystemSessionProperties.KEY_BASED_SAMPLING_FUNCTION;
@@ -63,7 +64,9 @@ import static com.facebook.presto.SystemSessionProperties.LEGACY_UNNEST;
 import static com.facebook.presto.SystemSessionProperties.MERGE_AGGREGATIONS_WITH_AND_WITHOUT_FILTER;
 import static com.facebook.presto.SystemSessionProperties.MERGE_DUPLICATE_AGGREGATIONS;
 import static com.facebook.presto.SystemSessionProperties.OFFSET_CLAUSE_ENABLED;
+import static com.facebook.presto.SystemSessionProperties.OPTIMIZER_USE_HISTOGRAMS;
 import static com.facebook.presto.SystemSessionProperties.OPTIMIZE_CASE_EXPRESSION_PREDICATE;
+import static com.facebook.presto.SystemSessionProperties.OPTIMIZE_HASH_GENERATION;
 import static com.facebook.presto.SystemSessionProperties.PREFILTER_FOR_GROUPBY_LIMIT;
 import static com.facebook.presto.SystemSessionProperties.PREFILTER_FOR_GROUPBY_LIMIT_TIMEOUT_MS;
 import static com.facebook.presto.SystemSessionProperties.PRE_PROCESS_METADATA_CALLS;
@@ -73,6 +76,7 @@ import static com.facebook.presto.SystemSessionProperties.PUSH_REMOTE_EXCHANGE_T
 import static com.facebook.presto.SystemSessionProperties.QUICK_DISTINCT_LIMIT_ENABLED;
 import static com.facebook.presto.SystemSessionProperties.RANDOMIZE_OUTER_JOIN_NULL_KEY;
 import static com.facebook.presto.SystemSessionProperties.RANDOMIZE_OUTER_JOIN_NULL_KEY_STRATEGY;
+import static com.facebook.presto.SystemSessionProperties.REMOVE_CROSS_JOIN_WITH_CONSTANT_SINGLE_ROW_INPUT;
 import static com.facebook.presto.SystemSessionProperties.REMOVE_MAP_CAST;
 import static com.facebook.presto.SystemSessionProperties.REMOVE_REDUNDANT_CAST_TO_VARCHAR_IN_JOIN;
 import static com.facebook.presto.SystemSessionProperties.REWRITE_CASE_TO_MAP_ENABLED;
@@ -1027,7 +1031,7 @@ public abstract class AbstractTestQueries
         assertQuerySucceeds(session, "SELECT DISTINCT custkey FROM orders LIMIT 10000");
 
         assertQuery(session, "" +
-                "SELECT DISTINCT x FROM (VALUES 1) t(x) JOIN (VALUES 10, 20) u(a) ON t.x < u.a LIMIT 100",
+                        "SELECT DISTINCT x FROM (VALUES 1) t(x) JOIN (VALUES 10, 20) u(a) ON t.x < u.a LIMIT 100",
                 "SELECT 1");
     }
 
@@ -1160,6 +1164,18 @@ public abstract class AbstractTestQueries
 
         assertQuery("SELECT COUNT(NULLIF(orderstatus, 'F')) FROM orders");
         assertQuery("SELECT COUNT(CAST(NULL AS BIGINT)) FROM orders"); // todo: make COUNT(null) work
+    }
+
+    @Test
+    public void testCountOverGlobalAggregation()
+    {
+        assertQuery("SELECT COUNT(*) FROM (SELECT COUNT(*) FROM nation)");
+    }
+
+    @Test
+    public void testCountOverGroupedAggregation()
+    {
+        assertQuery("SELECT COUNT(*) FROM (SELECT COUNT(*) FROM nation GROUP BY GROUPING SETS (nationkey, ()))", "SELECT 26");
     }
 
     @Test
@@ -1807,9 +1823,9 @@ public abstract class AbstractTestQueries
     public void testMinMaxN()
     {
         assertQuery("" +
-                "SELECT x FROM (" +
-                "SELECT min(orderkey, 3) t FROM orders" +
-                ") CROSS JOIN UNNEST(t) AS a(x)",
+                        "SELECT x FROM (" +
+                        "SELECT min(orderkey, 3) t FROM orders" +
+                        ") CROSS JOIN UNNEST(t) AS a(x)",
                 "VALUES 1, 2, 3");
 
         assertQuery(
@@ -2360,23 +2376,45 @@ public abstract class AbstractTestQueries
         String longValues = range(0, 5000)
                 .mapToObj(Integer::toString)
                 .collect(joining(", "));
-        assertQuery("SELECT orderkey FROM orders WHERE orderkey IN (" + longValues + ")");
-        assertQuery("SELECT orderkey FROM orders WHERE orderkey NOT IN (" + longValues + ")");
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ITERATIVE_OPTIMIZER_TIMEOUT, "15000ms")
+                .build();
+        assertQuery(session, "SELECT orderkey FROM orders WHERE orderkey IN (" + longValues + ")");
+        assertQuery(session, "SELECT orderkey FROM orders WHERE orderkey NOT IN (" + longValues + ")");
 
-        assertQuery("SELECT orderkey FROM orders WHERE orderkey IN (mod(1000, orderkey), " + longValues + ")");
-        assertQuery("SELECT orderkey FROM orders WHERE orderkey NOT IN (mod(1000, orderkey), " + longValues + ")");
+        assertQuery(session, "SELECT orderkey FROM orders WHERE orderkey IN (mod(1000, orderkey), " + longValues + ")");
+        assertQuery(session, "SELECT orderkey FROM orders WHERE orderkey NOT IN (mod(1000, orderkey), " + longValues + ")");
 
         String varcharValues = range(0, 5000)
                 .mapToObj(i -> "'" + i + "'")
                 .collect(joining(", "));
-        assertQuery("SELECT orderkey FROM orders WHERE cast(orderkey AS VARCHAR) IN (" + varcharValues + ")");
-        assertQuery("SELECT orderkey FROM orders WHERE cast(orderkey AS VARCHAR) NOT IN (" + varcharValues + ")");
+        assertQuery(session, "SELECT orderkey FROM orders WHERE cast(orderkey AS VARCHAR) IN (" + varcharValues + ")");
+        assertQuery(session, "SELECT orderkey FROM orders WHERE cast(orderkey AS VARCHAR) NOT IN (" + varcharValues + ")");
 
         String arrayValues = range(0, 5000)
                 .mapToObj(i -> format("ARRAY[%s, %s, %s]", i, i + 1, i + 2))
                 .collect(joining(", "));
-        assertQuery("SELECT ARRAY[0, 0, 0] in (ARRAY[0, 0, 0], " + arrayValues + ")", "values true");
-        assertQuery("SELECT ARRAY[0, 0, 0] in (" + arrayValues + ")", "values false");
+        assertQuery(session, "SELECT ARRAY[0, 0, 0] in (ARRAY[0, 0, 0], " + arrayValues + ")", "values true");
+        assertQuery(session, "SELECT ARRAY[0, 0, 0] in (" + arrayValues + ")", "values false");
+    }
+
+    @Test
+    public void testLargeInWithHistograms()
+    {
+        String longValues = range(0, 10_000)
+                .mapToObj(Integer::toString)
+                .collect(joining(", "));
+        String query = "select orderpriority, sum(totalprice) from lineitem join orders on lineitem.orderkey = orders.orderkey where orders.orderkey in (" + longValues + ") group by 1";
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ITERATIVE_OPTIMIZER_TIMEOUT, "30000ms")
+                .setSystemProperty(OPTIMIZER_USE_HISTOGRAMS, "true")
+                .build();
+        assertQuerySucceeds(session, query);
+        session = Session.builder(getSession())
+                .setSystemProperty(ITERATIVE_OPTIMIZER_TIMEOUT, "20000ms")
+                .setSystemProperty(OPTIMIZER_USE_HISTOGRAMS, "false")
+                .build();
+        assertQuerySucceeds(session, query);
     }
 
     @Test
@@ -5828,6 +5866,34 @@ public abstract class AbstractTestQueries
     }
 
     @Test
+    public void testSetAggIndeterminateRows()
+    {
+        // union all is to force usage of the serialized state
+        assertQuery("SELECT unnested from (SELECT set_agg(x) as agg_result from (" +
+                        "SELECT ARRAY[CAST(row(null, 2) AS ROW(INTEGER, INTEGER))] x " +
+                        "UNION ALL " +
+                        "SELECT ARRAY[null, CAST(row(1, null) AS ROW(INTEGER, INTEGER))] " +
+                        "UNION ALL " +
+                        "SELECT ARRAY[CAST(row(null, 2) AS ROW(INTEGER, INTEGER))])) " +
+                        "CROSS JOIN unnest(agg_result) as r(unnested)",
+                "SELECT * FROM (VALUES (ARRAY[null, row(1,null)]), (ARRAY[row(null, 2)]))");
+    }
+
+    @Test
+    public void testSetAggIndeterminateArrays()
+    {
+        // union all is to force usage of the serialized state
+        assertQuery("SELECT unnested from (SELECT set_agg(x) as agg_result from (" +
+                        "SELECT ARRAY[ARRAY[null, 2]] x " +
+                        "UNION ALL " +
+                        "SELECT ARRAY[null, ARRAY[1, null]] " +
+                        "UNION ALL " +
+                        "SELECT ARRAY[ARRAY[null, 2]])) " +
+                        "CROSS JOIN unnest(agg_result) as r(unnested)",
+                "SELECT * FROM (VALUES (ARRAY[null, ARRAY[1,null]]), (ARRAY[ARRAY[null, 2]]))");
+    }
+
+    @Test
     public void testRedundantProjection()
     {
         assertQuery(
@@ -5883,6 +5949,34 @@ public abstract class AbstractTestQueries
         assertQuery(
                 "select set_union(x) from (values null, array[null], null) as t(x) where x != null",
                 "select null");
+    }
+
+    @Test
+    public void testSetUnionIndeterminateRows()
+    {
+        // union all is to force usage of the serialized state
+        assertQuery("SELECT c1, c2 from (SELECT set_union(x) as agg_result from (" +
+                        "SELECT ARRAY[CAST(row(null, 2) AS ROW(INTEGER, INTEGER))] x " +
+                        "UNION ALL " +
+                        "SELECT ARRAY[null, CAST(row(1, null) AS ROW(INTEGER, INTEGER))] " +
+                        "UNION ALL " +
+                        "SELECT ARRAY[CAST(row(null, 2) AS ROW(INTEGER, INTEGER))])) " +
+                        "CROSS JOIN unnest(agg_result) as r(c1, c2)",
+                "SELECT * FROM (VALUES (1,null) , (null, 2), (null, null))");
+    }
+
+    @Test
+    public void testSetUnionIndeterminateArrays()
+    {
+        // union all is to force usage of the serialized state
+        assertQuery("SELECT unnested from (SELECT set_union(x) as agg_result from (" +
+                        "SELECT ARRAY[ARRAY[null, 2]] x " +
+                        "UNION ALL " +
+                        "SELECT ARRAY[null, ARRAY[1, null]] " +
+                        "UNION ALL " +
+                        "SELECT ARRAY[ARRAY[null, 2]])) " +
+                        "CROSS JOIN unnest(agg_result) as r(unnested)",
+                "SELECT * FROM (VALUES (null), (ARRAY[1,null]), (ARRAY[null, 2]))");
     }
 
     @Test
@@ -6148,7 +6242,7 @@ public abstract class AbstractTestQueries
     @Test
     public void testKeyBasedSampling()
     {
-        String[] queries = new String[] {
+        String[] queries = {
                 "select count(1) from orders join lineitem using(orderkey)",
                 "select count(1) from (select custkey, max(orderkey) from orders group by custkey)",
                 "select count_if(m >= 1) from (select max(orderkey) over(partition by custkey) m from orders)",
@@ -6158,7 +6252,7 @@ public abstract class AbstractTestQueries
                 "select count(1) from (select distinct orderkey, custkey from orders)",
         };
 
-        int[] unsampledResults = new int[] {60175, 1000, 15000, 5408941, 60175, 9256, 15000};
+        int[] unsampledResults = {60175, 1000, 15000, 5408941, 60175, 9256, 15000};
         for (int i = 0; i < queries.length; i++) {
             assertQuery(queries[i], "select " + unsampledResults[i]);
         }
@@ -6168,7 +6262,7 @@ public abstract class AbstractTestQueries
                 .setSystemProperty(KEY_BASED_SAMPLING_PERCENTAGE, "0.2")
                 .build();
 
-        int[] sampled20PercentResults = new int[] {37170, 616, 9189, 5408941, 37170, 5721, 9278};
+        int[] sampled20PercentResults = {37170, 616, 9189, 5408941, 37170, 5721, 9278};
         for (int i = 0; i < queries.length; i++) {
             assertQuery(sessionWithKeyBasedSampling, queries[i], "select " + sampled20PercentResults[i]);
         }
@@ -6178,7 +6272,7 @@ public abstract class AbstractTestQueries
                 .setSystemProperty(KEY_BASED_SAMPLING_PERCENTAGE, "0.1")
                 .build();
 
-        int[] sampled10PercentResults = new int[] {33649, 557, 8377, 4644937, 33649, 5098, 8397};
+        int[] sampled10PercentResults = {33649, 557, 8377, 4644937, 33649, 5098, 8397};
         for (int i = 0; i < queries.length; i++) {
             assertQuery(sessionWithKeyBasedSampling, queries[i], "select " + sampled10PercentResults[i]);
         }
@@ -7547,5 +7641,75 @@ public abstract class AbstractTestQueries
         assertTrue(((String) result.getMaterializedRows().get(0).getField(0)).indexOf("SemiJoin") != -1);
         result = computeActual(session, testQuery);
         assertTrue(result.getRowCount() == 25);
+    }
+
+    @Test
+    public void testRemoveCrossJoinWithSingleRowConstantInput()
+    {
+        Session enableOptimization = Session.builder(getSession())
+                .setSystemProperty(REMOVE_CROSS_JOIN_WITH_CONSTANT_SINGLE_ROW_INPUT, "true")
+                .build();
+        assertQuery(enableOptimization, "SELECT * FROM (SELECT EXTRACT(DAY FROM DATE '2017-01-01')) t CROSS JOIN (VALUES 1)",
+                "values (1, 1)");
+        assertQuery(enableOptimization, "SELECT * FROM (SELECT * FROM (VALUES 1) t(a)) t, region r WHERE r.regionkey = t.a");
+        assertQuery(enableOptimization, "WITH t(msg) AS (SELECT * FROM (VALUES ROW(CAST(ROW(1, 2.0) AS ROW(x BIGINT, y DOUBLE))))) SELECT b.msg.x FROM t a, t b WHERE a.msg.y = b.msg.y",
+                "values 1");
+        assertQuery(enableOptimization, "WITH t(msg) AS (SELECT * FROM (VALUES ROW(CAST(ROW(1, 2.0) AS ROW(x BIGINT, y DOUBLE))))) SELECT a.msg.y, b.msg.x from t a cross join t b where a.msg.x = 7 or is_finite(b.msg.y)",
+                "values (2.0, 1)");
+        assertQuery(enableOptimization, "WITH t(msg) AS (SELECT * FROM (VALUES ROW(CAST(ROW(1, 2.0) AS ROW(x BIGINT, y DOUBLE))))) SELECT b.msg.x FROM t a, t b WHERE a.msg.y = b.msg.y limit 100",
+                "values 1");
+    }
+
+    /**
+     * When optimize_hash_generation is enabled, the "hash_code" operator is used for
+     * hashing join/group by values. When it is disabled Type.hash() is used.
+     * We want to test both code paths.
+     */
+    @DataProvider(name = "optimize_hash_generation")
+    public Object[][] optimizeHashGeneration()
+    {
+        return new Object[][] {{"true"}, {"false"}};
+    }
+
+    @Test(dataProvider = "optimize_hash_generation")
+    public void testDoubleJoinPositiveAndNegativeZero(String optimizeHashGeneration)
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(OPTIMIZE_HASH_GENERATION, optimizeHashGeneration)
+                .build();
+        assertQuery(session, "WITH t AS ( SELECT * FROM (VALUES(DOUBLE '0.0'), (DOUBLE '-0.0'))_t(x)) SELECT * FROM t t1 JOIN t t2 on t1.x = t2.x",
+                "SELECT * FROM (VALUES (0.0, 0.0), (0.0, -0.0), (-0.0, 0.0), (-0.0, -0.0))");
+    }
+
+    @Test(dataProvider = "optimize_hash_generation")
+    public void testRealJoinPositiveAndNegativeZero(String optimizeHashGeneration)
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(OPTIMIZE_HASH_GENERATION, optimizeHashGeneration)
+                .build();
+        assertQuery(session, "WITH t AS ( SELECT * FROM (VALUES(REAL '0.0'), (REAL '-0.0'))_t(x)) SELECT * FROM t t1 JOIN t t2 on t1.x = t2.x",
+                "SELECT * FROM (VALUES " +
+                        "(CAST (0.0 AS REAL), CAST (0.0 AS REAL)), " +
+                        "(CAST (0.0 AS REAL),  CAST(-0.0 AS REAL)), " +
+                        "(CAST (-0.0 AS REAL), CAST(0.0 AS REAL)), " +
+                        "(CAST (-0.0 AS REAL), CAST(-0.0 AS REAL)))");
+    }
+
+    @Test(dataProvider = "optimize_hash_generation")
+    public void testDoubleDistinctPositiveAndNegativeZero(String optimizeHashGeneration)
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(OPTIMIZE_HASH_GENERATION, optimizeHashGeneration)
+                .build();
+        assertQuery(session, "SELECT DISTINCT x FROM (VALUES (DOUBLE '0.0'), (DOUBLE '-0.0')) t(x)", "SELECT 0.0");
+    }
+
+    @Test(dataProvider = "optimize_hash_generation")
+    public void testRealDistinctPositiveAndNegativeZero(String optimizeHashGeneration)
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(OPTIMIZE_HASH_GENERATION, optimizeHashGeneration)
+                .build();
+        assertQuery(session, "SELECT DISTINCT x FROM (VALUES (REAL '0.0'), (REAL '-0.0')) t(x)", "SELECT  CAST(0.0 AS REAL)");
     }
 }

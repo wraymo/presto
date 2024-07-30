@@ -8,12 +8,12 @@ Overview
 The Iceberg connector allows querying data stored in Iceberg tables.
 
 Metastores
------------
+----------
 Iceberg tables store most of the metadata in the metadata files, along with the data on the
 filesystem, but it still requires a central place to find the current location of the
 current metadata pointer for a table. This central place is called the ``Iceberg Catalog``.
-The Presto Iceberg connector supports different types of Iceberg Catalogs : ``Hive Metastore``,
-``GLUE``, ``NESSIE``, ``REST`` and ``HADOOP``.
+The Presto Iceberg connector supports different types of Iceberg Catalogs : ``HIVE``,
+``NESSIE``, ``REST``, and ``HADOOP``.
 
 To configure the Iceberg connector, create a catalog properties file
 ``etc/catalog/iceberg.properties``. To define the catalog type, ``iceberg.catalog.type`` property
@@ -44,6 +44,48 @@ as a Hive connector.
     connector.name=iceberg
     hive.metastore=glue
     iceberg.catalog.type=hive
+
+There are additional configurations available when using the Iceberg connector configured with Hive
+or Glue catalogs.
+
+======================================================== ============================================================= ============
+Property Name                                            Description                                                   Default
+======================================================== ============================================================= ============
+``hive.metastore.uri``                                   The URI(s) of the Hive metastore to connect to using the
+                                                         Thrift protocol. If multiple URIs are provided, the first
+                                                         URI is used by default, and the rest of the URIs are
+                                                         fallback metastores.
+
+                                                         Example: ``thrift://192.0.2.3:9083`` or
+                                                         ``thrift://192.0.2.3:9083,thrift://192.0.2.4:9083``.
+
+                                                         This property is required if the
+                                                         ``iceberg.catalog.type`` is ``hive`` and ``hive.metastore``
+                                                         is ``thrift``.
+
+``iceberg.hive-statistics-merge-strategy``               Comma separated list of statistics to use from the
+                                                         Hive Metastore to override Iceberg table statistics.
+                                                         The available values are ``NUMBER_OF_DISTINCT_VALUES``
+                                                         and ``TOTAL_SIZE_IN_BYTES``.
+
+                                                         **Note**: Only valid when the Iceberg connector is
+                                                         configured with Hive.
+
+``iceberg.hive.table-refresh.backoff-min-sleep-time``    The minimum amount of time to sleep between retries when      100ms
+                                                         refreshing table metadata.
+
+``iceberg.hive.table-refresh.backoff-max-sleep-time``    The maximum amount of time to sleep between retries when      5s
+                                                         refreshing table metadata.
+
+``iceberg.hive.table-refresh.max-retry-time``            The maximum amount of time to take across all retries before  1min
+                                                         failing a table metadata refresh operation.
+
+``iceberg.hive.table-refresh.retries``                   The number of times to retry after errors when refreshing     20
+                                                         table metadata using the Hive metastore.
+
+``iceberg.hive.table-refresh.backoff-scale-factor``      The multiple used to scale subsequent wait time between       4.0
+                                                         retries.
+======================================================== ============================================================= ============
 
 Nessie catalog
 ^^^^^^^^^^^^^^
@@ -194,35 +236,11 @@ To use a Hadoop catalog, configure the catalog type as
     iceberg.catalog.type=hadoop
     iceberg.catalog.warehouse=hdfs://hostname:port
 
-Configuration Properties
-------------------------
-
-.. note::
-
-    The Iceberg connector supports configuration options for
-    `Amazon S3 <https://prestodb.io/docs/current/connector/hive.html##amazon-s3-configuration>`_
-    as a Hive connector.
-
-The following configuration properties are available:
+Hadoop catalog configuration properties:
 
 ======================================================= ============================================================= ============
 Property Name                                           Description                                                   Default
 ======================================================= ============================================================= ============
-``hive.metastore.uri``                                  The URI(s) of the Hive metastore to connect to using the
-                                                        Thrift protocol. If multiple URIs are provided, the first
-                                                        URI is used by default, and the rest of the URIs are
-                                                        fallback metastores.
-
-                                                        Example: ``thrift://192.0.2.3:9083`` or
-                                                        ``thrift://192.0.2.3:9083,thrift://192.0.2.4:9083``.
-
-                                                        This property is required if the
-                                                        ``iceberg.catalog.type`` is ``hive``. Otherwise, it will
-                                                        be ignored.
-
-``iceberg.catalog.type``                                The catalog type for Iceberg tables. The available values     ``hive``
-                                                        are ``hive``, ``hadoop``, and ``nessie``.
-
 ``iceberg.catalog.warehouse``                           The catalog warehouse root path for Iceberg tables.
 
                                                         Example: ``hdfs://nn:8020/warehouse/path``
@@ -232,6 +250,24 @@ Property Name                                           Description             
 ``iceberg.catalog.cached-catalog-num``                  The number of Iceberg catalogs to cache. This property is     ``10``
                                                         required if the ``iceberg.catalog.type`` is ``hadoop``.
                                                         Otherwise, it will be ignored.
+======================================================= ============================================================= ============
+
+Configuration Properties
+------------------------
+
+.. note::
+
+    The Iceberg connector supports configuration options for
+    `Amazon S3 <https://prestodb.io/docs/current/connector/hive.html##amazon-s3-configuration>`_
+    as a Hive connector.
+
+The following configuration properties are available for all catalog types:
+
+======================================================= ============================================================= ============
+Property Name                                           Description                                                   Default
+======================================================= ============================================================= ============
+``iceberg.catalog.type``                                The catalog type for Iceberg tables. The available values     ``HIVE``
+                                                        are ``HIVE``, ``HADOOP``, and ``NESSIE`` and ``REST``.
 
 ``iceberg.hadoop.config.resources``                     The path(s) for Hadoop configuration resources.
 
@@ -261,14 +297,6 @@ Property Name                                           Description             
                                                         as a join with the data of the equality delete files.
 
 ``iceberg.enable-parquet-dereference-pushdown``         Enable parquet dereference pushdown.                          ``true``
-
-``iceberg.hive-statistics-merge-strategy``              Comma separated list of statistics to use from the
-                                                        Hive Metastore to override Iceberg table statistics.
-                                                        The available values are ``NUMBER_OF_DISTINCT_VALUES``
-                                                        and ``TOTAL_SIZE_IN_BYTES``.
-
-                                                        **Note**: Only valid when the Iceberg connector is
-                                                        configured with Hive.
 
 ``iceberg.statistic-snapshot-record-difference-weight`` The amount that the difference in total record count matters
                                                         when calculating the closest snapshot when picking
@@ -346,7 +374,7 @@ and a file system location of ``s3://test_bucket/test_schema/test_table``:
     )
 
 Session Properties
--------------------
+------------------
 
 Session properties set behavior changes for queries executed within the given session.
 
@@ -363,10 +391,10 @@ Property Name                                         Description
 ===================================================== ======================================================================
 
 Caching Support
-----------------
+---------------
 
 Manifest File Caching
-^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^
 
 As of Iceberg version 1.1.0, Apache Iceberg provides a mechanism to cache the contents of Iceberg manifest files in memory. This feature helps
 to reduce repeated reads of small Iceberg manifest files from remote storage.
@@ -780,7 +808,7 @@ The Iceberg connector supports querying and manipulating Iceberg tables and sche
 (databases). Here are some examples of the SQL operations supported by Presto:
 
 CREATE SCHEMA
-^^^^^^^^^^^^^^
+^^^^^^^^^^^^^
 
 Create a new Iceberg schema named ``web`` that stores tables in an
 S3 bucket named ``my-bucket``::
@@ -789,7 +817,7 @@ S3 bucket named ``my-bucket``::
     WITH (location = 's3://my-bucket/')
 
 CREATE TABLE
-^^^^^^^^^^^^^
+^^^^^^^^^^^^
 
 Create a new Iceberg table named ``page_views`` in the ``web`` schema
 that is stored using the ORC file format, partitioned by ``ds`` and
@@ -823,7 +851,7 @@ Create an Iceberg table with Iceberg format version 2::
     )
 
 Partition Column Transform
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 Beyond selecting some particular columns for partitioning, you can use the ``transform`` functions and partition the table
 by the transformed value of the column.
 
@@ -888,7 +916,7 @@ Create an Iceberg table partitioned by ``ts``::
     );
 
 CREATE VIEW
-^^^^^^^^^^^^
+^^^^^^^^^^^
 
 The Iceberg connector supports creating views in Hive and Glue metastores.
 To create a view named ``view_page_views`` for the ``iceberg.web.page_views`` table created in the `CREATE TABLE`_ example::
@@ -896,14 +924,14 @@ To create a view named ``view_page_views`` for the ``iceberg.web.page_views`` ta
     CREATE VIEW iceberg.web.view_page_views AS SELECT user_id, country FROM iceberg.web.page_views;
 
 INSERT INTO
-^^^^^^^^^^^^
+^^^^^^^^^^^
 
 Insert data into the ``page_views`` table::
 
     INSERT INTO iceberg.web.page_views VALUES(TIMESTAMP '2023-08-12 03:04:05.321', 1, 'https://example.com', current_date, 'country');
 
 CREATE TABLE AS SELECT
-^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^
 
 Create a new table ``page_views_new`` from an existing table ``page_views``::
 
@@ -927,7 +955,7 @@ Presto supports reading delete files, including Position Delete Files and Equali
 When reading, Presto merges these delete files to read the latest results.
 
 ALTER TABLE
-^^^^^^^^^^^^
+^^^^^^^^^^^
 
 Alter table operations are supported in the Iceberg connector::
 
@@ -979,7 +1007,7 @@ dropping the table from the metadata catalog using ``TRUNCATE TABLE``.
     (0 rows)
 
 DELETE
-^^^^^^^^
+^^^^^^
 
 The Iceberg connector can delete data from tables by using ``DELETE FROM``. For example, to delete from the table ``lineitem``::
 
@@ -1000,7 +1028,7 @@ The Iceberg connector can delete data from tables by using ``DELETE FROM``. For 
     columns of the target table.
 
 DROP TABLE
-^^^^^^^^^^^
+^^^^^^^^^^
 
 Drop the table ``page_views`` ::
 
@@ -1010,21 +1038,155 @@ Drop the table ``page_views`` ::
 * Dropping an Iceberg table with Hadoop and Nessie catalogs removes all the data and metadata in the table.
 
 DROP VIEW
-^^^^^^^^^^
+^^^^^^^^^
 
 Drop the view ``view_page_views``::
 
     DROP VIEW iceberg.web.view_page_views;
 
 DROP SCHEMA
-^^^^^^^^^^^^
+^^^^^^^^^^^
 
 Drop the schema ``iceberg.web``::
 
     DROP SCHEMA iceberg.web
 
+SHOW CREATE TABLE
+^^^^^^^^^^^^^^^^^
+
+Show the SQL statement that creates the specified Iceberg table by using ``SHOW CREATE TABLE``.
+
+For example, ``SHOW CREATE TABLE`` from the partitioned Iceberg table ``customer``:
+
+.. code-block:: sql
+
+    SHOW CREATE TABLE customer;
+
+.. code-block:: text
+
+    CREATE TABLE iceberg.tpch_iceberg.customer (
+        "custkey" bigint,
+        "name" varchar,
+        "address" varchar,
+        "nationkey" bigint,
+        "phone" varchar,
+        "acctbal" double,
+        "mktsegment" varchar,
+        "comment" varchar
+    )
+    WITH (
+        delete_mode = 'copy-on-write',
+        format = 'PARQUET',
+        format_version = '2',
+        location = 's3a://tpch-iceberg/customer',
+        partitioning = ARRAY['mktsegment']
+    )
+    (1 row)
+
+``SHOW CREATE TABLE`` from the un-partitioned Iceberg table ``region``:
+
+.. code-block:: sql
+
+    SHOW CREATE TABLE region;
+
+.. code-block:: text
+
+    CREATE TABLE iceberg.tpch_iceberg.region (
+        "regionkey" bigint,
+        "name" varchar,
+        "comment" varchar
+    )
+    WITH (
+        delete_mode = 'copy-on-write',
+        format = 'PARQUET',
+        format_version = '2',
+        location = 's3a://tpch-iceberg/region'
+    )
+    (1 row)
+
+SHOW COLUMNS
+^^^^^^^^^^^^
+
+List the columns in table along with their data type and other attributes by using ``SHOW COLUMNS``.
+
+For example, ``SHOW COLUMNS`` from the partitioned Iceberg table ``customer``:
+
+.. code-block:: sql
+
+    SHOW COLUMNS FROM customer;
+
+.. code-block:: text
+
+       Column   |  Type   |     Extra     | Comment
+    ------------+---------+---------------+---------
+     custkey    | bigint  |               |
+     name       | varchar |               |
+     address    | varchar |               |
+     nationkey  | bigint  |               |
+     phone      | varchar |               |
+     acctbal    | double  |               |
+     mktsegment | varchar | partition key |
+     comment    | varchar |               |
+     (8 rows)
+
+``SHOW COLUMNS`` from the un-partitioned Iceberg table ``region``:
+
+.. code-block:: sql
+
+    SHOW COLUMNS FROM region;
+
+.. code-block:: text
+
+      Column   |  Type   | Extra | Comment
+    -----------+---------+-------+---------
+     regionkey | bigint  |       |
+     name      | varchar |       |
+     comment   | varchar |       |
+     (3 rows)
+
+DESCRIBE
+^^^^^^^^
+
+List the columns in table along with their data type and other attributes by using ``DESCRIBE``.
+``DESCRIBE`` is an alias for ``SHOW COLUMNS``.
+
+For example, ``DESCRIBE`` from the partitioned Iceberg table ``customer``:
+
+.. code-block:: sql
+
+   DESCRIBE customer;
+
+.. code-block:: text
+
+       Column   |  Type   |     Extra     | Comment
+    ------------+---------+---------------+---------
+     custkey    | bigint  |               |
+     name       | varchar |               |
+     address    | varchar |               |
+     nationkey  | bigint  |               |
+     phone      | varchar |               |
+     acctbal    | double  |               |
+     mktsegment | varchar | partition key |
+     comment    | varchar |               |
+     (8 rows)
+
+``DESCRIBE`` from the un-partitioned Iceberg table ``region``:
+
+.. code-block:: sql
+
+    DESCRIBE region;
+
+.. code-block:: text
+
+      Column   |  Type   | Extra | Comment
+    -----------+---------+-------+---------
+     regionkey | bigint  |       |
+     name      | varchar |       |
+     comment   | varchar |       |
+     (3 rows)
+
 Schema Evolution
------------------
+----------------
 
 Iceberg and Presto Iceberg connector support in-place table evolution, also known as
 schema evolution, such as adding, dropping, and renaming columns. With schema
@@ -1240,6 +1402,18 @@ even if the data has changed or been deleted since then.
             10 | united states |         1 | comment
     (1 row)
 
+.. code-block:: sql
+
+    // snapshot ID for second record using BEFORE clause to retrieve previous state
+    SELECT * FROM ctas_nation FOR SYSTEM_VERSION BEFORE 6891257133877048303;
+
+.. code-block:: text
+
+     nationkey |      name     | regionkey | comment
+    -----------+---------------+-----------+---------
+            10 | united states |         1 | comment
+    (1 row)
+
 In above example, SYSTEM_VERSION can be used as an alias for VERSION.
 
 You can access the historical data of a table using FOR TIMESTAMP AS OF TIMESTAMP.
@@ -1279,6 +1453,18 @@ In the following query, the expression CURRENT_TIMESTAMP returns the current tim
             30 | mexico        |         3 | comment
     (3 rows)
 
+.. code-block:: sql
+
+    // In following query, timestamp string is matching with second inserted record.
+    // BEFORE clause returns first record which is less than timestamp of the second record.
+    SELECT * FROM ctas_nation FOR TIMESTAMP BEFORE TIMESTAMP '2023-10-17 13:29:46.822 America/Los_Angeles';
+
+.. code-block:: text
+
+     nationkey |      name     | regionkey | comment
+    -----------+---------------+-----------+---------
+            10 | united states |         1 | comment
+    (1 row)
 
 Type mapping
 ------------
