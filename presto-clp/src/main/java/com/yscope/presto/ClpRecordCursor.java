@@ -13,8 +13,9 @@
  */
 package com.yscope.presto;
 
-import com.facebook.presto.common.block.BlockBuilder;
 import com.facebook.airlift.log.Logger;
+import com.facebook.presto.common.block.Block;
+import com.facebook.presto.common.block.BlockBuilder;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.spi.RecordCursor;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -39,14 +40,14 @@ public class ClpRecordCursor
         implements RecordCursor
 {
     private static final Logger log = Logger.get(ClpRecordCursor.class);
-    private long readLineTime;
-    private long parseLineTime;
-    private long parseFieldTime;
-    private long getFieldTime;
     private final BufferedReader reader;
     private final boolean isPolymorphicTypeEnabled;
     private final List<ClpColumnHandle> columnHandles;
     private final List<JsonNode> fields;
+    private long readLineTime;
+    private long parseLineTime;
+    private long parseFieldTime;
+    private long getFieldTime;
 
     public ClpRecordCursor(BufferedReader reader, boolean isPolymorphicTypeEnabled, List<ClpColumnHandle> columnHandles)
     {
@@ -151,14 +152,19 @@ public class ClpRecordCursor
     @Override
     public Slice getSlice(int field)
     {
+        long startTs = System.currentTimeMillis();
         checkFieldType(field, createUnboundedVarcharType());
         JsonNode node = fields.get(field);
-        return Slices.utf8Slice(node.asText());
+        Slice result = Slices.utf8Slice(node.asText());
+        long endTs = System.currentTimeMillis();
+        getFieldTime += endTs - startTs;
+        return result;
     }
 
     @Override
     public Object getObject(int field)
     {
+        long startTs = System.currentTimeMillis();
         JsonNode node = fields.get(field);
         if (node.isArray()) {
             BlockBuilder builder = VARCHAR.createBlockBuilder(null, node.size());
@@ -166,7 +172,10 @@ public class ClpRecordCursor
             while (elements.hasNext()) {
                 VARCHAR.writeString(builder, elements.next().asText());
             }
-            return builder.build();
+            Block result = builder.build();
+            long endTs = System.currentTimeMillis();
+            getFieldTime += endTs - startTs;
+            return result;
         }
         throw new UnsupportedOperationException();
     }
