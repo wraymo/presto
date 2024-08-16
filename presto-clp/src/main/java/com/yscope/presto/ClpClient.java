@@ -224,14 +224,14 @@ public class ClpClient
         return polymorphicColumnHandles;
     }
 
-    public BufferedReader getRecords(String tableName, Optional<String> query)
+    public BufferedReader getRecords(String tableName, Optional<String> query, List<String> columns)
     {
         if (!listTables().contains(tableName)) {
             return null;
         }
 
         if (query.isPresent()) {
-            return searchTable(tableName, query.get());
+            return searchTable(tableName, query.get(), columns);
         }
         else {
             Path decompressFile = decompressDir.resolve(tableName).resolve("original");
@@ -252,15 +252,19 @@ public class ClpClient
         }
     }
 
-    private BufferedReader searchTable(String tableName, String query)
+    private BufferedReader searchTable(String tableName, String query, List<String> columns)
     {
         Path tableArchiveDir = Paths.get(config.getClpArchiveDir(), tableName);
         try {
-            ProcessBuilder processBuilder =
-                    new ProcessBuilder(executablePath.toString(),
-                            "s",
-                            tableArchiveDir.toString(),
-                            query);
+            List<String> argumentList = new ArrayList<>();
+            argumentList.add(executablePath.toString());
+            argumentList.add("s");
+            argumentList.add(tableArchiveDir.toString());
+            argumentList.add(query);
+            argumentList.add("--projection");
+            argumentList.addAll(columns);
+            log.info("Argument list: %s", argumentList.toString());
+            ProcessBuilder processBuilder = new ProcessBuilder(argumentList);
             Process process = processBuilder.start();
             return new BufferedReader(new InputStreamReader(process.getInputStream()));
         }
