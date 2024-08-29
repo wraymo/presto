@@ -240,6 +240,8 @@ void PrestoServer::run() {
       std::make_unique<IcebergPrestoToVeloxConnector>("iceberg"));
   registerPrestoToVeloxConnector(
       std::make_unique<TpchPrestoToVeloxConnector>("tpch"));
+  registerPrestoToVeloxConnector(
+      std::make_unique<ClpPrestoToVeloxConnector>("clp"));
   // Presto server uses system catalog or system schema in other catalogs
   // in different places in the code. All these resolve to the SystemConnector.
   // Depending on where the operator or column is used, different prefixes can

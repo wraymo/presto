@@ -3227,3 +3227,55 @@ enum class NodeState { ACTIVE, INACTIVE, SHUTTING_DOWN };
 extern void to_json(json& j, const NodeState& e);
 extern void from_json(const json& j, NodeState& e);
 } // namespace facebook::presto::protocol
+
+namespace facebook::presto::protocol {
+struct ClpTableHandle : public ConnectorTableHandle {
+  String tableName = {};
+
+  ClpTableHandle() noexcept;
+};
+void to_json(json& j, const ClpTableHandle& p);
+void from_json(const json& j, ClpTableHandle& p);
+} // namespace facebook::presto::protocol
+namespace facebook::presto::protocol {
+struct ClpTableLayoutHandle : public ConnectorTableLayoutHandle {
+  ClpTableHandle table = {};
+  std::shared_ptr<String> query = {};
+
+  ClpTableLayoutHandle() noexcept;
+};
+void to_json(json& j, const ClpTableLayoutHandle& p);
+void from_json(const json& j, ClpTableLayoutHandle& p);
+} // namespace facebook::presto::protocol
+
+namespace facebook::presto::protocol {
+struct ClpColumnHandle : public ColumnHandle {
+  String columnName = {};
+  Type columnType = {};
+  bool nullable = {};
+
+  ClpColumnHandle() noexcept;
+};
+void to_json(json& j, const ClpColumnHandle& p);
+void from_json(const json& j, ClpColumnHandle& p);
+} // namespace facebook::presto::protocol
+
+namespace facebook::presto::protocol {
+struct ClpSplit : public ConnectorSplit {
+  String schemaName = {};
+  String tableName = {};
+  std::shared_ptr<String> query = {};
+
+  ClpSplit() noexcept;
+};
+void to_json(json& j, const ClpSplit& p);
+void from_json(const json& j, ClpSplit& p);
+} // namespace facebook::presto::protocol
+
+namespace facebook::presto::protocol {
+struct ClpTransactionHandle : public ConnectorTransactionHandle {
+  String instance = {};
+};
+void to_json(json& j, const ClpTransactionHandle& p);
+void from_json(const json& j, ClpTransactionHandle& p);
+} // namespace facebook::presto::protocol

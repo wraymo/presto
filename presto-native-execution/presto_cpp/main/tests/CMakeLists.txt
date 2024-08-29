@@ -38,6 +38,7 @@ target_link_libraries(
   $<TARGET_OBJECTS:presto_types>
   velox_hive_connector
   velox_tpch_connector
+  velox_clp_connector
   velox_presto_serializer
   velox_functions_prestosql
   velox_aggregates

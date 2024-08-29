@@ -261,6 +261,17 @@ using TpchConnectorProtocol = ConnectorProtocolTemplate<
     TpchTransactionHandle,
     NotImplemented>;
 
+using ClpConnectorProtocol = ConnectorProtocolTemplate<
+    ClpTableHandle,
+    ClpTableLayoutHandle,
+    ClpColumnHandle,
+    NotImplemented,
+    NotImplemented,
+    ClpSplit,
+    NotImplemented,
+    ClpTransactionHandle,
+    NotImplemented>;
+
 using SystemConnectorProtocol = ConnectorProtocolTemplate<
     SystemTableHandle,
     SystemTableLayoutHandle,

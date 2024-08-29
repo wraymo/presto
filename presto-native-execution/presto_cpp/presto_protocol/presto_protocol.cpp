@@ -13896,3 +13896,105 @@ void from_json(const json& j, NodeState& e) {
           ->first;
 }
 } // namespace facebook::presto::protocol
+
+namespace facebook::presto::protocol {
+ClpTableHandle::ClpTableHandle() noexcept {
+  _type = "clp";
+}
+
+void to_json(json& j, const ClpTableHandle& p) {
+  j = json::object();
+  j["@type"] = "clp";
+  to_json_key(
+      j, "tableName", p.tableName, "ClpTableHandle", "String", "tableName");
+}
+
+void from_json(const json& j, ClpTableHandle& p) {
+  p._type = j["@type"];
+  from_json_key(
+      j, "tableName", p.tableName, "ClpTableHandle", "String", "tableName");
+}
+} // namespace facebook::presto::protocol
+
+namespace facebook::presto::protocol {
+ClpTableLayoutHandle::ClpTableLayoutHandle() noexcept {
+  _type = "clp";
+}
+
+void to_json(json& j, const ClpTableLayoutHandle& p) {
+  j = json::object();
+  j["@type"] = "clp";
+  to_json_key(
+      j, "table", p.table, "ClpTableLayoutHandle", "ClpTableHandle", "table");
+  to_json_key(j, "query", p.query, "ClpTableLayoutHandle", "String", "query");
+}
+
+void from_json(const json& j, ClpTableLayoutHandle& p) {
+  p._type = j["@type"];
+  from_json_key(
+      j, "table", p.table, "ClpTableLayoutHandle", "ClpTableHandle", "table");
+  from_json_key(j, "query", p.query, "ClpTableLayoutHandle", "String", "query");
+}
+} // namespace facebook::presto::protocol
+
+namespace facebook::presto::protocol {
+ClpColumnHandle::ClpColumnHandle() noexcept {
+  _type = "clp";
+}
+
+void to_json(json& j, const ClpColumnHandle& p) {
+  j = json::object();
+  j["@type"] = "clp";
+  to_json_key(
+      j, "columnName", p.columnName, "ClpColumnHandle", "String", "columnName");
+  to_json_key(
+      j, "columnType", p.columnType, "ClpColumnHandle", "Type", "columnType");
+  to_json_key(j, "nullable", p.nullable, "ClpColumnHandle", "bool", "nullable");
+}
+
+void from_json(const json& j, ClpColumnHandle& p) {
+  p._type = j["@type"];
+  from_json_key(
+      j, "columnName", p.columnName, "ClpColumnHandle", "String", "columnName");
+  from_json_key(
+      j, "columnType", p.columnType, "ClpColumnHandle", "Type", "columnType");
+  from_json_key(
+      j, "nullable", p.nullable, "ClpColumnHandle", "bool", "nullable");
+}
+} // namespace facebook::presto::protocol
+
+namespace facebook::presto::protocol {
+ClpSplit::ClpSplit() noexcept {
+  _type = "clp";
+}
+
+void to_json(json& j, const ClpSplit& p) {
+  j = json::object();
+  j["@type"] = "clp";
+  to_json_key(
+      j, "schemaName", p.schemaName, "ClpSplit", "String", "schemaName");
+  to_json_key(j, "tableName", p.tableName, "ClpSplit", "String", "tableName");
+  to_json_key(j, "query", p.query, "ClpSplit", "String", "query");
+}
+
+void from_json(const json& j, ClpSplit& p) {
+  p._type = j["@type"];
+  from_json_key(
+      j, "schemaName", p.schemaName, "ClpSplit", "String", "schemaName");
+  from_json_key(j, "tableName", p.tableName, "ClpSplit", "String", "tableName");
+  from_json_key(j, "query", p.query, "ClpSplit", "String", "query");
+}
+} // namespace facebook::presto::protocol
+
+namespace facebook::presto::protocol {
+void to_json(json& j, const ClpTransactionHandle& p) {
+  j = json::array();
+  j.push_back(p._type);
+  j.push_back(p.instance);
+}
+
+void from_json(const json& j, ClpTransactionHandle& p) {
+  j[0].get_to(p._type);
+  j[1].get_to(p.instance);
+}
+} // namespace facebook::presto::protocol
