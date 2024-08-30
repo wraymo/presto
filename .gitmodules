@@ -1,4 +1,4 @@
 [submodule "presto-native-execution/velox"]
 	path = presto-native-execution/velox
     url = https://github.com/wraymo/velox.git
-    branch = clp_integration
+    branch = clp_integration_benchmark
