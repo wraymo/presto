@@ -25,24 +25,26 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.yscope.presto.schema.SchemaNode;
 import com.yscope.presto.schema.SchemaTree;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
 
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
 import javax.inject.Inject;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
 
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -50,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 import static java.util.Objects.requireNonNull;
 
@@ -57,11 +60,11 @@ public class ClpClient
 {
     private static final Logger log = Logger.get(ClpClient.class);
     private final ClpConfig config;
-    private final Path executablePath;
     private final Map<String, Set<ClpColumnHandle>> tableNameToColumnHandles;
     private final Map<String, List<String>> tableNameToArchiveIds;
     private final Path decompressDir;
     private Set<String> tableNames;
+    private final ClpConfig.InputSource inputSource;
 
     @Inject
     public ClpClient(ClpConfig config)
@@ -69,89 +72,13 @@ public class ClpClient
         this.config = requireNonNull(config, "config is null");
         this.tableNameToColumnHandles = new HashMap<>();
         this.tableNameToArchiveIds = new HashMap<>();
-        this.executablePath = getExecutablePath();
         this.decompressDir = Paths.get(System.getProperty("java.io.tmpdir"), "clp_decompress");
-    }
-
-    @PostConstruct
-    public void start()
-    {
-        try {
-            Files.createDirectories(decompressDir);
-        }
-        catch (IOException e) {
-            log.error(e, "Failed to create decompression directory");
-        }
-    }
-
-    @PreDestroy
-    public void close()
-    {
-        try {
-            Files.walkFileTree(decompressDir, new SimpleFileVisitor<Path>()
-            {
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException
-                {
-                    Files.delete(file);
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException
-                {
-                    if (exc == null) {
-                        Files.delete(dir);
-                        return FileVisitResult.CONTINUE;
-                    }
-                    else {
-                        throw exc; // Directory iteration failed
-                    }
-                }
-            });
-        }
-        catch (IOException e) {
-            log.error(e, "Failed to delete decompression directory");
-        }
+        this.inputSource = config.getInputSource();
     }
 
     public ClpConfig getConfig()
     {
         return config;
-    }
-
-    private Path getExecutablePath()
-    {
-        String executablePathString = config.getClpExecutablePath();
-        if (executablePathString == null || executablePathString.isEmpty()) {
-            Path executablePath = getExecutablePathFromEnvironment();
-            if (executablePath == null) {
-                throw new RuntimeException("CLP executable path is not set");
-            }
-            return executablePath;
-        }
-        Path executablePath = Paths.get(executablePathString);
-        if (!Files.exists(executablePath) || !Files.isRegularFile(executablePath)) {
-            executablePath = getExecutablePathFromEnvironment();
-            if (executablePath == null) {
-                throw new RuntimeException("CLP executable path is not set");
-            }
-        }
-        return executablePath;
-    }
-
-    private Path getExecutablePathFromEnvironment()
-    {
-        String executablePathString = System.getenv("CLP_EXECUTABLE_PATH");
-        if (executablePathString == null || executablePathString.isEmpty()) {
-            return null;
-        }
-
-        Path executablePath = Paths.get(executablePathString);
-        if (!Files.exists(executablePath) || !Files.isRegularFile(executablePath)) {
-            return null;
-        }
-        return executablePath;
     }
 
     public Set<String> listTables()
@@ -163,24 +90,57 @@ public class ClpClient
             tableNames = ImmutableSet.of();
             return tableNames;
         }
-        Path archiveDir = Paths.get(config.getClpArchiveDir());
-        if (!Files.exists(archiveDir) || !Files.isDirectory(archiveDir)) {
-            tableNames = ImmutableSet.of();
-            return tableNames;
+
+        if (inputSource == ClpConfig.InputSource.FILESYSTEM) {
+            Path archiveDir = Paths.get(config.getClpArchiveDir());
+            if (!Files.exists(archiveDir) || !Files.isDirectory(archiveDir)) {
+                tableNames = ImmutableSet.of();
+                return tableNames;
+            }
+
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(archiveDir)) {
+                ImmutableSet.Builder<String> tableNames = ImmutableSet.builder();
+                for (Path path : stream) {
+                    if (Files.isDirectory(path)) {
+                        tableNames.add(path.getFileName().toString());
+                    }
+                }
+                this.tableNames = tableNames.build();
+            }
+            catch (Exception e) {
+                log.error(e, "Failed to list tables");
+                this.tableNames = ImmutableSet.of();
+            }
+        }
+        else if (inputSource == ClpConfig.InputSource.TERRABLOB) {
+            try {
+                URL url = new URL(config.getClpArchiveDir());
+                String queryUrl = url.getProtocol() + "://" + url.getHost() + ":" + url.getPort() + "/?prefix=" +
+                        url.getPath();
+
+                HttpURLConnection connection = (HttpURLConnection) new URL(queryUrl).openConnection();
+                connection.setRequestMethod("GET");
+                DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+                DocumentBuilder builder = factory.newDocumentBuilder();
+                Document doc = builder.parse(connection.getInputStream());
+                doc.getDocumentElement().normalize();
+                NodeList contents = doc.getElementsByTagName("Contents");
+                this.tableNames = IntStream.range(0, contents.getLength())
+                        .mapToObj(i -> (Element) contents.item(i))
+                        .map(contentElement -> contentElement.getElementsByTagName("Key").item(0).getTextContent())
+                        .filter(fullPath -> fullPath.endsWith("/"))
+                        .map(fullPath -> {
+                            String sanitizedPath = fullPath.substring(0, fullPath.length() - 1);
+                            return sanitizedPath.substring(sanitizedPath.lastIndexOf('/') + 1);
+                        })
+                        .collect(ImmutableSet.toImmutableSet());
+            }
+            catch (Exception e) {
+                this.tableNames = ImmutableSet.of();
+                log.error(e, "Failed to list tables");
+            }
         }
 
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(archiveDir)) {
-            ImmutableSet.Builder<String> tableNames = ImmutableSet.builder();
-            for (Path path : stream) {
-                if (Files.isDirectory(path)) {
-                    tableNames.add(path.getFileName().toString());
-                }
-            }
-            this.tableNames = tableNames.build();
-        }
-        catch (Exception e) {
-            this.tableNames = ImmutableSet.of();
-        }
         return this.tableNames;
     }
 
@@ -216,32 +176,37 @@ public class ClpClient
             return tableNameToColumnHandles.get(tableName);
         }
 
-        Path tableDir = Paths.get(config.getClpArchiveDir(), tableName);
         LinkedHashSet<ClpColumnHandle> columnHandles = new LinkedHashSet<>();
-        if (!Files.exists(tableDir) || !Files.isDirectory(tableDir)) {
-            return ImmutableSet.of();
-        }
+        if (config.getInputSource() == ClpConfig.InputSource.FILESYSTEM) {
+            Path tableDir = Paths.get(config.getClpArchiveDir(), tableName);
+            if (!Files.exists(tableDir) || !Files.isDirectory(tableDir)) {
+                return ImmutableSet.of();
+            }
 
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(tableDir)) {
-            for (Path path : stream) {
-                if (Files.isRegularFile(path)) {
-                    continue;
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(tableDir)) {
+                for (Path path : stream) {
+                    if (Files.isRegularFile(path)) {
+                        continue;
+                    }
+
+                    // For each directory, get schema_maps file under it
+                    Path schemaMapsFile = path.resolve("schema_tree");
+                    if (!Files.exists(schemaMapsFile) || !Files.isRegularFile(schemaMapsFile)) {
+                        continue;
+                    }
+
+                    columnHandles.addAll(parseSchemaTreeFile(schemaMapsFile));
                 }
-
-                // For each directory, get schema_maps file under it
-                Path schemaMapsFile = path.resolve("schema_tree");
-                if (!Files.exists(schemaMapsFile) || !Files.isRegularFile(schemaMapsFile)) {
-                    continue;
-                }
-
-                columnHandles.addAll(parseSchemaTreeFile(schemaMapsFile));
+            }
+            catch (Exception e) {
+                tableNameToColumnHandles.put(tableName, ImmutableSet.of());
+                return ImmutableSet.of();
             }
         }
-        catch (Exception e) {
-            tableNameToColumnHandles.put(tableName, ImmutableSet.of());
-            return ImmutableSet.of();
+        else if (config.getInputSource() == ClpConfig.InputSource.TERRABLOB) {
+            String schemaFileUrl = config.getClpArchiveDir() + "/" + tableName + "/flattened_schema";
+            columnHandles.addAll(parseFlattenedSchemaFile(schemaFileUrl));
         }
-
         if (!config.isPolymorphicTypeEnabled()) {
             tableNameToColumnHandles.put(tableName, columnHandles);
             return columnHandles;
@@ -263,30 +228,12 @@ public class ClpClient
         else {
             return searchTable(tableName, archiveId, "*", columns);
         }
-//        else {
-//            Path decompressFile = decompressDir.resolve(tableName).resolve("original");
-//            if (!Files.exists(decompressFile) || !Files.isRegularFile(decompressFile)) {
-//                if (!decompressRecords(tableName)) {
-//                    return null;
-//                }
-//                log.info("Decompress records to %s", decompressFile.toString());
-//            }
-//
-//            try {
-//                return Files.newBufferedReader(decompressFile);
-//            }
-//            catch (IOException e) {
-//                log.error(e, "Failed to get records for table %s", tableName);
-//                return null;
-//            }
-//        }
     }
 
     private ProcessBuilder searchTable(String tableName, String archiveId, String query, List<String> columns)
     {
         Path tableArchiveDir = Paths.get(config.getClpArchiveDir(), tableName);
         List<String> argumentList = new ArrayList<>();
-        argumentList.add(executablePath.toString());
         argumentList.add("s");
         argumentList.add(tableArchiveDir.toString());
         argumentList.add("--archive-id");
@@ -307,8 +254,7 @@ public class ClpClient
 
         try {
             ProcessBuilder processBuilder =
-                    new ProcessBuilder(executablePath.toString(),
-                            "x",
+                    new ProcessBuilder("x",
                             tableArchiveDir.toString(),
                             tableDecompressDir.toString());
             Process process = processBuilder.start();
@@ -318,6 +264,58 @@ public class ClpClient
         catch (IOException | InterruptedException e) {
             log.error(e, "Failed to decompress records for table %s", tableName);
             return false;
+        }
+    }
+
+    private Set<ClpColumnHandle> parseFlattenedSchemaFile(String schemaFileUrl)
+    {
+        try {
+            HttpURLConnection fileConnection = (HttpURLConnection) new URL(schemaFileUrl).openConnection();
+            fileConnection.setRequestMethod("GET");
+            InputStream inputStream = fileConnection.getInputStream();
+            ZstdInputStream zstdInputStream = new ZstdInputStream(inputStream);
+            DataInputStream dataInputStream = new DataInputStream(zstdInputStream);
+            byte[] longBytes = new byte[8];
+            byte[] intBytes = new byte[4];
+            dataInputStream.readFully(longBytes);
+            long numberOfNodes = ByteBuffer.wrap(longBytes).order(ByteOrder.nativeOrder()).getLong();
+            LinkedHashSet<ClpColumnHandle> columnHandles = new LinkedHashSet<>();
+            for (int i = 0; i < numberOfNodes; i++) {
+                dataInputStream.readFully(longBytes);
+                long stringSize = ByteBuffer.wrap(longBytes).order(ByteOrder.nativeOrder()).getLong();
+                byte[] stringBytes = new byte[(int) stringSize];
+                dataInputStream.readFully(stringBytes);
+                String name = new String(stringBytes, StandardCharsets.UTF_8);
+                SchemaNode.NodeType type = SchemaNode.NodeType.fromType(dataInputStream.readByte());
+                Type prestoType = null;
+                switch (type) {
+                    case Integer:
+                        prestoType = BigintType.BIGINT;
+                        break;
+                    case Float:
+                        prestoType = DoubleType.DOUBLE;
+                        break;
+                    case ClpString:
+                    case VarString:
+                    case DateString:
+                    case NullValue:
+                        prestoType = VarcharType.VARCHAR;
+                        break;
+                    case UnstructuredArray:
+                        prestoType = new ArrayType(VarcharType.VARCHAR);
+                        break;
+                    case Boolean:
+                        prestoType = BooleanType.BOOLEAN;
+                        break;
+                    default:
+                        break;
+                }
+                columnHandles.add(new ClpColumnHandle(name, prestoType, true));
+            }
+            return columnHandles;
+        }
+        catch (IOException e) {
+            return ImmutableSet.of();
         }
     }
 

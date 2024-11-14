@@ -17,21 +17,9 @@ import com.facebook.airlift.configuration.Config;
 
 public class ClpConfig
 {
-    private String clpExecutablePath;
     private String clpArchiveDir;
     private boolean polymorphicTypeEnabled;
-
-    public String getClpExecutablePath()
-    {
-        return clpExecutablePath;
-    }
-
-    @Config("executable-path")
-    public ClpConfig setClpExecutablePath(String clpExecutablePath)
-    {
-        this.clpExecutablePath = clpExecutablePath;
-        return this;
-    }
+    private InputSource inputSource = InputSource.FILESYSTEM;
 
     public String getClpArchiveDir()
     {
@@ -55,5 +43,25 @@ public class ClpConfig
     {
         this.polymorphicTypeEnabled = polymorphicTypeEnabled;
         return this;
+    }
+
+    public InputSource getInputSource()
+    {
+        return inputSource;
+    }
+
+    @Config("input-source")
+    public ClpConfig setInputSource(InputSource inputSource)
+    {
+        this.inputSource = inputSource;
+        return this;
+    }
+
+    public enum InputSource
+    {
+        FILESYSTEM,
+        S3,
+        NETWORK,
+        TERRABLOB,
     }
 }
