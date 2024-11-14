@@ -153,7 +153,11 @@ public class ClpClient
             try {
                 URL url = new URL(config.getClpArchiveDir());
                 String queryUrl = url.getProtocol() + "://" + url.getHost() + ":" + url.getPort() + "/?prefix=" +
-                        url.getPath() + "/" + tableName;
+                        url.getPath();
+                if (queryUrl.endsWith("/")) {
+                    queryUrl = queryUrl.substring(0, queryUrl.length() - 1);
+                }
+                queryUrl += "/" + tableName + "/";
 
                 HttpURLConnection connection = (HttpURLConnection) new URL(queryUrl).openConnection();
                 connection.setRequestMethod("GET");
