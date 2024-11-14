@@ -149,25 +149,55 @@ public class ClpClient
         if (tableNameToArchiveIds.containsKey(tableName)) {
             return tableNameToArchiveIds.get(tableName);
         }
-        Path tableDir = Paths.get(config.getClpArchiveDir(), tableName);
-        if (!Files.exists(tableDir) || !Files.isDirectory(tableDir)) {
-            return ImmutableList.of();
-        }
+        if (inputSource == ClpConfig.InputSource.TERRABLOB) {
+            try {
+                URL url = new URL(config.getClpArchiveDir());
+                String queryUrl = url.getProtocol() + "://" + url.getHost() + ":" + url.getPort() + "/?prefix=" +
+                        url.getPath() + "/" + tableName;
 
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(tableDir)) {
-            ImmutableList.Builder<String> archiveIds = ImmutableList.builder();
-            for (Path path : stream) {
-                if (Files.isDirectory(path)) {
-                    archiveIds.add(path.getFileName().toString());
-                }
+                HttpURLConnection connection = (HttpURLConnection) new URL(queryUrl).openConnection();
+                connection.setRequestMethod("GET");
+                DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+                DocumentBuilder builder = factory.newDocumentBuilder();
+                Document doc = builder.parse(connection.getInputStream());
+                doc.getDocumentElement().normalize();
+                NodeList contents = doc.getElementsByTagName("Contents");
+                return IntStream.range(0, contents.getLength())
+                        .mapToObj(i -> (Element) contents.item(i))
+                        .map(contentElement -> contentElement.getElementsByTagName("Key").item(0).getTextContent())
+                        .filter(fullPath -> !fullPath.endsWith("flattened_schema"))
+                        .map(fullPath -> {
+                            return fullPath.substring(fullPath.lastIndexOf('/') + 1);
+                        })
+                        .collect(ImmutableList.toImmutableList());
             }
-            List<String> archiveIdsList = archiveIds.build();
-            tableNameToArchiveIds.put(tableName, archiveIdsList);
-            return archiveIdsList;
+            catch (Exception e) {
+                log.error(e, "Failed to list archives for table %s", tableName);
+                return ImmutableList.of();
+            }
         }
-        catch (Exception e) {
-            return ImmutableList.of();
+        else if (inputSource == ClpConfig.InputSource.FILESYSTEM) {
+            Path tableDir = Paths.get(config.getClpArchiveDir(), tableName);
+            if (!Files.exists(tableDir) || !Files.isDirectory(tableDir)) {
+                return ImmutableList.of();
+            }
+
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(tableDir)) {
+                ImmutableList.Builder<String> archiveIds = ImmutableList.builder();
+                for (Path path : stream) {
+                    if (Files.isDirectory(path)) {
+                        archiveIds.add(path.getFileName().toString());
+                    }
+                }
+                List<String> archiveIdsList = archiveIds.build();
+                tableNameToArchiveIds.put(tableName, archiveIdsList);
+                return archiveIdsList;
+            }
+            catch (Exception e) {
+                return ImmutableList.of();
+            }
         }
+        return ImmutableList.of();
     }
 
     public Set<ClpColumnHandle> listColumns(String tableName)
