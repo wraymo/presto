@@ -34,10 +34,10 @@ public class ClpMySqlMetadataProvider
 {
     private static final Logger log = Logger.get(ClpMySqlMetadataProvider.class);
 
-    public static final String COLUMN_METADATA_PREFIX = "column_metadata_";
-    private static final String QUERY_SELECT_COLUMNS = "SELECT * FROM %s" + COLUMN_METADATA_PREFIX + "%s";
-    private static final String TABLE_METADATA_TABLE_SUFFIX = "table_metadata";
-    private static final String QUERY_SELECT_TABLES = "SELECT table_name FROM %s" + TABLE_METADATA_TABLE_SUFFIX;
+    public static final String COLUMN_METADATA_TABLE_SUFFIX = "_column_metadata";
+    private static final String QUERY_SELECT_COLUMNS = "SELECT * FROM %s%s" + COLUMN_METADATA_TABLE_SUFFIX;
+    private static final String DATASETS_TABLE_SUFFIX = "datasets";
+    private static final String QUERY_SELECT_TABLES = "SELECT name FROM %s" + DATASETS_TABLE_SUFFIX;
 
     private final ClpConfig config;
 
@@ -98,7 +98,7 @@ public class ClpMySqlMetadataProvider
                 Statement statement = connection.createStatement();
                 ResultSet resultSet = statement.executeQuery(query)) {
             while (resultSet.next()) {
-                String tableName = resultSet.getString("table_name");
+                String tableName = resultSet.getString("name");
                 if (isValidIdentifier(tableName)) {
                     tableNames.add(tableName);
                 }

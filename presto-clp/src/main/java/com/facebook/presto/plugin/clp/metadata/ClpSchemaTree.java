@@ -106,7 +106,9 @@ public class ClpSchemaTree
                 ClpNode existing = current.children.get(leafName);
 
                 if (existing.type != null && !existing.type.equals(prestoType)) {
-                    String existingSuffix = existing.type.getDisplayName();
+                    String existingSuffix = (existing.type instanceof ArrayType)
+                            ? "array"
+                            : existing.type.getDisplayName();
                     String renamedExisting = leafName + "_" + existingSuffix;
 
                     current.children.remove(leafName);

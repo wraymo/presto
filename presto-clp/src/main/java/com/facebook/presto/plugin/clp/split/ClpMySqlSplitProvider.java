@@ -36,9 +36,9 @@ public class ClpMySqlSplitProvider
     private static final Logger log = Logger.get(ClpMySqlSplitProvider.class);
 
     private static final String ARCHIVE_TABLE_SUFFIX = "_archives";
-    private static final String TABLE_METADATA_TABLE_SUFFIX = "table_metadata";
-    private static final String QUERY_SELECT_ARCHIVE_IDS = "SELECT archive_id FROM %s%s" + ARCHIVE_TABLE_SUFFIX;
-    private static final String QUERY_SELECT_TABLE_METADATA = "SELECT table_path FROM %s" + TABLE_METADATA_TABLE_SUFFIX + " WHERE table_name = '%s'";
+    private static final String DATASETS_TABLE_SUFFIX = "datasets";
+    private static final String QUERY_SELECT_ARCHIVE_IDS = "SELECT id FROM %s%s" + ARCHIVE_TABLE_SUFFIX;
+    private static final String QUERY_SELECT_TABLE_METADATA = "SELECT archive_storage_directory FROM %s" + DATASETS_TABLE_SUFFIX + " WHERE name = '%s'";
 
     private final ClpConfig config;
 
@@ -84,7 +84,7 @@ public class ClpMySqlSplitProvider
                     log.error("Table metadata not found for table: %s", tableName);
                     return ImmutableList.of();
                 }
-                tablePath = resultSet.getString("table_path");
+                tablePath = resultSet.getString("archive_storage_directory");
             }
 
             if (tablePath == null || tablePath.isEmpty()) {
@@ -96,9 +96,9 @@ public class ClpMySqlSplitProvider
             try (PreparedStatement statement = connection.prepareStatement(archivePathQuery);
                     ResultSet resultSet = statement.executeQuery()) {
                 while (resultSet.next()) {
-                    final String archiveId = resultSet.getString("archive_id");
+                    final String archiveId = resultSet.getString("id");
                     final String archivePath = tablePath + "/" + archiveId;
-                    splits.add(new ClpSplit(tableSchemaName, archivePath, clpTableLayoutHandle.getKqlQuery()));
+                    splits.add(new ClpSplit(archivePath));
                 }
             }
         }
