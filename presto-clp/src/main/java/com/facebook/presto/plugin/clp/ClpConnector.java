@@ -21,8 +21,6 @@ import com.facebook.presto.spi.connector.ConnectorPlanOptimizerProvider;
 import com.facebook.presto.spi.connector.ConnectorRecordSetProvider;
 import com.facebook.presto.spi.connector.ConnectorSplitManager;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
-import com.facebook.presto.spi.function.FunctionMetadataManager;
-import com.facebook.presto.spi.function.StandardFunctionResolution;
 import com.facebook.presto.spi.transaction.IsolationLevel;
 
 import javax.inject.Inject;
@@ -36,31 +34,27 @@ public class ClpConnector
 
     private final LifeCycleManager lifeCycleManager;
     private final ClpMetadata metadata;
+    private final ClpPlanOptimizerProvider planOptimizerProvider;
     private final ClpRecordSetProvider recordSetProvider;
     private final ClpSplitManager splitManager;
-    private final FunctionMetadataManager functionManager;
-    private final StandardFunctionResolution functionResolution;
-
     @Inject
     public ClpConnector(LifeCycleManager lifeCycleManager,
                         ClpMetadata metadata,
+                        ClpPlanOptimizerProvider planOptimizerProvider,
                         ClpRecordSetProvider recordSetProvider,
-                        ClpSplitManager splitManager,
-                        FunctionMetadataManager functionManager,
-                        StandardFunctionResolution functionResolution)
+                        ClpSplitManager splitManager)
     {
         this.lifeCycleManager = requireNonNull(lifeCycleManager, "lifeCycleManager is null");
         this.metadata = requireNonNull(metadata, "metadata is null");
+        this.planOptimizerProvider = requireNonNull(planOptimizerProvider, "planOptimizerProvider is null");
         this.recordSetProvider = requireNonNull(recordSetProvider, "recordSetProvider is null");
         this.splitManager = requireNonNull(splitManager, "splitManager is null");
-        this.functionManager = requireNonNull(functionManager, "functionManager is null");
-        this.functionResolution = requireNonNull(functionResolution, "functionResolution is null");
     }
 
     @Override
     public ConnectorPlanOptimizerProvider getConnectorPlanOptimizerProvider()
     {
-        return new ClpPlanOptimizerProvider(functionManager, functionResolution);
+        return planOptimizerProvider;
     }
 
     @Override

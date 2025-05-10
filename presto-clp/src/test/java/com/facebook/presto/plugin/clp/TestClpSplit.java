@@ -66,6 +66,7 @@ public class TestClpSplit
         final String createTableMetadataSQL = String.format(
                 "CREATE TABLE IF NOT EXISTS %s (" +
                         " name VARCHAR(255) PRIMARY KEY," +
+                        " archive_storage_type VARCHAR(4096) NOT NULL," +
                         " archive_storage_directory VARCHAR(4096) NOT NULL)", datasetsTableName);
 
         try (Connection conn = DriverManager.getConnection(metadataDbUrl, metadataDbUser, metadataDbPassword);
@@ -73,11 +74,13 @@ public class TestClpSplit
             stmt.execute(createTableMetadataSQL);
 
             // Insert table metadata in batch
-            String insertTableMetadataSQL = String.format("INSERT INTO %s (name, archive_storage_directory) VALUES (?, ?)", datasetsTableName);
+            String insertTableMetadataSQL = String.format(
+                    "INSERT INTO %s (name, archive_storage_type, archive_storage_directory) VALUES (?, ?, ?)", datasetsTableName);
             try (PreparedStatement pstmt = conn.prepareStatement(insertTableMetadataSQL)) {
                 for (String tableName : TABLE_NAME_LIST) {
                     pstmt.setString(1, tableName);
-                    pstmt.setString(2, "/tmp/archives/" + tableName);
+                    pstmt.setString(2, "fs");
+                    pstmt.setString(3, "/tmp/archives/" + tableName);
                     pstmt.addBatch();
                 }
                 pstmt.executeBatch();
@@ -128,11 +131,13 @@ public class TestClpSplit
     {
         ClpSplitProvider splitProvider = new ClpMySqlSplitProvider(config);
         for (String tableName : TABLE_NAME_LIST) {
-            ClpTableLayoutHandle layoutHandle = new ClpTableLayoutHandle(new ClpTableHandle(new SchemaTableName(TABLE_SCHEMA, tableName)), Optional.empty());
+            ClpTableLayoutHandle layoutHandle = new ClpTableLayoutHandle(
+                    new ClpTableHandle(new SchemaTableName(TABLE_SCHEMA, tableName), ClpTableHandle.StorageType.FS),
+                    Optional.empty());
             List<ClpSplit> splits = splitProvider.listSplits(layoutHandle);
             assertEquals(splits.size(), NUM_SPLITS);
             for (int i = 0; i < NUM_SPLITS; i++) {
-                assertEquals(splits.get(i).getSplitPath(), "/tmp/archives/" + tableName + "/id_" + i);
+                assertEquals(splits.get(i).getPath(), "/tmp/archives/" + tableName + "/id_" + i);
             }
         }
     }

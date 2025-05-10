@@ -20,15 +20,26 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Objects;
 
+import static com.google.common.base.MoreObjects.toStringHelper;
+
 public class ClpTableHandle
         implements ConnectorTableHandle
 {
+    public enum StorageType
+    {
+        FS, // Local File System
+        S3
+    }
+
     private final SchemaTableName schemaTableName;
+    private final StorageType storageType;
 
     @JsonCreator
-    public ClpTableHandle(@JsonProperty("schemaTableName") SchemaTableName schemaTableName)
+    public ClpTableHandle(@JsonProperty("schemaTableName") SchemaTableName schemaTableName,
+                          @JsonProperty("storageType") StorageType storageType)
     {
         this.schemaTableName = schemaTableName;
+        this.storageType = storageType;
     }
 
     @JsonProperty
@@ -37,10 +48,16 @@ public class ClpTableHandle
         return schemaTableName;
     }
 
+    @JsonProperty
+    public StorageType getStorageType()
+    {
+        return storageType;
+    }
+
     @Override
     public int hashCode()
     {
-        return Objects.hash(schemaTableName);
+        return Objects.hash(schemaTableName, storageType);
     }
 
     @Override
@@ -53,12 +70,16 @@ public class ClpTableHandle
             return false;
         }
         ClpTableHandle other = (ClpTableHandle) obj;
-        return this.schemaTableName.equals(other.schemaTableName);
+        return this.schemaTableName.equals(other.schemaTableName) &&
+               this.storageType == other.storageType;
     }
 
     @Override
     public String toString()
     {
-        return schemaTableName.toString();
+        return toStringHelper(this)
+                .add("schemaTableName", schemaTableName)
+                .add("storageType", storageType)
+                .toString();
     }
 }

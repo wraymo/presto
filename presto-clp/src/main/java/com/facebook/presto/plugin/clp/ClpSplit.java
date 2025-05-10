@@ -21,8 +21,6 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableList;
 
-import javax.annotation.Nullable;
-
 import java.util.List;
 
 import static com.facebook.presto.spi.schedule.NodeSelectionStrategy.NO_PREFERENCE;
@@ -30,18 +28,18 @@ import static com.facebook.presto.spi.schedule.NodeSelectionStrategy.NO_PREFEREN
 public class ClpSplit
         implements ConnectorSplit
 {
-    private final String splitPath;
+    private final String path;
 
     @JsonCreator
-    public ClpSplit(@JsonProperty("splitPath") @Nullable String splitPath)
+    public ClpSplit(@JsonProperty("path") String path)
     {
-        this.splitPath = splitPath;
+        this.path = path;
     }
 
     @JsonProperty
-    public String getSplitPath()
+    public String getPath()
     {
-        return splitPath;
+        return path;
     }
 
     @Override

@@ -78,6 +78,7 @@ public class TestClpMetadata
         final String createTableMetadataSQL = String.format(
                 "CREATE TABLE IF NOT EXISTS %s (" +
                         " name VARCHAR(255) PRIMARY KEY," +
+                        " archive_storage_type VARCHAR(4096) NOT NULL," +
                         " archive_storage_directory VARCHAR(4096) NOT NULL)", datasetsTableName);
 
         final String createColumnMetadataSQL = String.format(
@@ -87,7 +88,7 @@ public class TestClpMetadata
                         " PRIMARY KEY (name, type))", columnMetadataTableName);
 
         final String insertTableMetadataSQL = String.format(
-                "INSERT INTO %s (name, archive_storage_directory) VALUES (?, ?)", datasetsTableName);
+                "INSERT INTO %s (name, archive_storage_type, archive_storage_directory) VALUES (?, ?, ?)", datasetsTableName);
 
         final String insertColumnMetadataSQL = String.format(
                 "INSERT INTO %s (name, type) VALUES (?, ?)", columnMetadataTableName);
@@ -100,7 +101,8 @@ public class TestClpMetadata
             // Insert table metadata
             try (PreparedStatement pstmt = conn.prepareStatement(insertTableMetadataSQL)) {
                 pstmt.setString(1, TABLE_NAME);
-                pstmt.setString(2, "/tmp/archives/" + TABLE_NAME);
+                pstmt.setString(2, "fs");
+                pstmt.setString(3, "/tmp/archives/" + TABLE_NAME);
                 pstmt.executeUpdate();
             }
 

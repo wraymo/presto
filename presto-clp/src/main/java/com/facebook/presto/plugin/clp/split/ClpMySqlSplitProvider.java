@@ -34,13 +34,23 @@ public class ClpMySqlSplitProvider
         implements ClpSplitProvider
 {
     private static final Logger log = Logger.get(ClpMySqlSplitProvider.class);
+    private final ClpConfig config;
 
+    // Column names
+    private static final String ARCHIVES_TABLE_COLUMN_ID = "id";
+    private static final String DATASETS_TABLE_COLUMN_NAME = "name";
+    private static final String DATASETS_TABLE_COLUMN_ARCHIVE_STORAGE_DIRECTORY = "archive_storage_directory";
+
+    // Table suffixes
     private static final String ARCHIVE_TABLE_SUFFIX = "_archives";
     private static final String DATASETS_TABLE_SUFFIX = "datasets";
-    private static final String QUERY_SELECT_ARCHIVE_IDS = "SELECT id FROM %s%s" + ARCHIVE_TABLE_SUFFIX;
-    private static final String QUERY_SELECT_TABLE_METADATA = "SELECT archive_storage_directory FROM %s" + DATASETS_TABLE_SUFFIX + " WHERE name = '%s'";
 
-    private final ClpConfig config;
+    // SQL templates
+    private static final String SQL_SELECT_ARCHIVES_TEMPLATE =
+            String.format("SELECT %s FROM %%s%%s%s", ARCHIVES_TABLE_COLUMN_ID, ARCHIVE_TABLE_SUFFIX);
+    private static final String SQL_SELECT_DATASETS_TEMPLATE =
+            String.format("SELECT %s FROM %%s%s WHERE %s = ?", DATASETS_TABLE_COLUMN_ARCHIVE_STORAGE_DIRECTORY,
+                    DATASETS_TABLE_SUFFIX, DATASETS_TABLE_COLUMN_NAME);
 
     @Inject
     public ClpMySqlSplitProvider(ClpConfig config)
@@ -72,23 +82,25 @@ public class ClpMySqlSplitProvider
         SchemaTableName tableSchemaName = clpTableLayoutHandle.getTable().getSchemaTableName();
         String tableName = tableSchemaName.getTableName();
 
-        String tablePathQuery = String.format(QUERY_SELECT_TABLE_METADATA, config.getMetadataTablePrefix(), tableName);
-        String archivePathQuery = String.format(QUERY_SELECT_ARCHIVE_IDS, config.getMetadataTablePrefix(), tableName);
+        String tablePathQuery = String.format(SQL_SELECT_DATASETS_TEMPLATE, config.getMetadataTablePrefix(), tableName);
+        String archivePathQuery = String.format(SQL_SELECT_ARCHIVES_TEMPLATE, config.getMetadataTablePrefix(), tableName);
 
         try (Connection connection = getConnection()) {
             // Fetch table path
             String tablePath;
-            try (PreparedStatement statement = connection.prepareStatement(tablePathQuery);
-                    ResultSet resultSet = statement.executeQuery()) {
-                if (!resultSet.next()) {
-                    log.error("Table metadata not found for table: %s", tableName);
-                    return ImmutableList.of();
+            try (PreparedStatement statement = connection.prepareStatement(tablePathQuery)) {
+                statement.setString(1, tableName);
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    if (!resultSet.next()) {
+                        log.warn("Table metadata not found for table: %s", tableName);
+                        return ImmutableList.of();
+                    }
+                    tablePath = resultSet.getString(DATASETS_TABLE_COLUMN_ARCHIVE_STORAGE_DIRECTORY);
                 }
-                tablePath = resultSet.getString("archive_storage_directory");
             }
 
             if (tablePath == null || tablePath.isEmpty()) {
-                log.error("Table path is null for table: %s", tableName);
+                log.warn("Table path is null for table: %s", tableName);
                 return ImmutableList.of();
             }
 
@@ -96,14 +108,14 @@ public class ClpMySqlSplitProvider
             try (PreparedStatement statement = connection.prepareStatement(archivePathQuery);
                     ResultSet resultSet = statement.executeQuery()) {
                 while (resultSet.next()) {
-                    final String archiveId = resultSet.getString("id");
+                    final String archiveId = resultSet.getString(ARCHIVES_TABLE_COLUMN_ID);
                     final String archivePath = tablePath + "/" + archiveId;
                     splits.add(new ClpSplit(archivePath));
                 }
             }
         }
         catch (SQLException e) {
-            log.error("Database error while processing splits for %s: %s", tableName, e);
+            log.warn("Database error while processing splits for %s: %s", tableName, e);
         }
 
         return splits;

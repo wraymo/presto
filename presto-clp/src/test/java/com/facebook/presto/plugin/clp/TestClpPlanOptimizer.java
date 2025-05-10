@@ -41,6 +41,9 @@ public class TestClpPlanOptimizer
             assertTrue(kqlExpression.isPresent());
             assertEquals(kqlExpression.get(), expectedKqlExpression.get());
         }
+        else {
+            assertFalse(kqlExpression.isPresent());
+        }
 
         if (expectedRemainingExpression.isPresent()) {
             assertTrue(remainingExpression.isPresent());

@@ -58,7 +58,7 @@ public class TestClpQueryBase
     protected static final StandardFunctionResolution standardFunctionResolution = new FunctionResolution(functionAndTypeManager.getFunctionAndTypeResolver());
     protected static final Metadata metadata = MetadataManager.createTestMetadataManager();
 
-    protected static ClpColumnHandle city = new ClpColumnHandle("city", RowType.from(ImmutableList.of(
+    protected static final ClpColumnHandle city = new ClpColumnHandle("city", RowType.from(ImmutableList.of(
             RowType.field("Name", VARCHAR),
             RowType.field("Region", RowType.from(ImmutableList.of(
                     RowType.field("Id", BIGINT),
