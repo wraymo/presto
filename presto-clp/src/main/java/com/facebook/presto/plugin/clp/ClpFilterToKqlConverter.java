@@ -106,7 +106,7 @@ public class ClpFilterToKqlConverter
             }
         }
 
-        return new ClpExpression(node);
+        return tryInterpretClpUdf(functionMetadata, node);
     }
 
     @Override
@@ -682,6 +682,27 @@ public class ClpFilterToKqlConverter
                     node);
         }
         // fallback
+        return new ClpExpression(node);
+    }
+
+    private ClpExpression tryInterpretClpUdf(FunctionMetadata functionMetadata, CallExpression node)
+    {
+        String functionName = functionMetadata.getName().getObjectName().toUpperCase();
+        if (functionName.startsWith("CLP_GET")) {
+            int numArguments = node.getArguments().size();
+            if (numArguments == 1) {
+                RowExpression argument = node.getArguments().get(0);
+                if (!(argument instanceof ConstantExpression)) {
+                    throw new PrestoException(CLP_PUSHDOWN_UNSUPPORTED_EXPRESSION,
+                            "The argument of " + functionName + " must be a ConstantExpression");
+                }
+                ClpExpression expression = node.getArguments().get(0).accept(this, null);
+                if (expression.getDefinition().isPresent()) {
+                    return new ClpExpression(expression.getDefinition().get());
+                }
+            }
+        }
+
         return new ClpExpression(node);
     }
 }

@@ -16,10 +16,19 @@ package com.facebook.presto.plugin.clp;
 import com.facebook.presto.spi.Plugin;
 import com.facebook.presto.spi.connector.ConnectorFactory;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+
+import java.util.Set;
 
 public class ClpPlugin
         implements Plugin
 {
+    @Override
+    public Set<Class<?>> getFunctions()
+    {
+        return ImmutableSet.of(ClpFunctions.class);
+    }
+
     @Override
     public Iterable<ConnectorFactory> getConnectorFactories()
     {

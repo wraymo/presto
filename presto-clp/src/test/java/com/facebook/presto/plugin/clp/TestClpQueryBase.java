@@ -15,11 +15,18 @@ package com.facebook.presto.plugin.clp;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.SystemSessionProperties;
+import com.facebook.presto.common.block.BlockEncodingManager;
 import com.facebook.presto.common.type.RowType;
 import com.facebook.presto.common.type.Type;
+import com.facebook.presto.metadata.AnalyzePropertyManager;
+import com.facebook.presto.metadata.CatalogManager;
+import com.facebook.presto.metadata.ColumnPropertyManager;
 import com.facebook.presto.metadata.FunctionAndTypeManager;
+import com.facebook.presto.metadata.FunctionExtractor;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.MetadataManager;
+import com.facebook.presto.metadata.SchemaPropertyManager;
+import com.facebook.presto.metadata.TablePropertyManager;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.WarningCollector;
@@ -50,13 +57,25 @@ import static com.facebook.presto.metadata.FunctionAndTypeManager.createTestFunc
 import static com.facebook.presto.metadata.SessionPropertyManager.createTestingSessionPropertyManager;
 import static com.facebook.presto.sql.analyzer.ExpressionAnalyzer.getExpressionTypes;
 import static com.facebook.presto.testing.TestingConnectorSession.SESSION;
+import static com.facebook.presto.transaction.InMemoryTransactionManager.createTestTransactionManager;
 import static java.util.stream.Collectors.toMap;
 
 public class TestClpQueryBase
 {
     protected static final FunctionAndTypeManager functionAndTypeManager = createTestFunctionAndTypeManager();
+    static {
+        functionAndTypeManager.registerBuiltInFunctions(FunctionExtractor.extractFunctions(ClpFunctions.class));
+    }
     protected static final StandardFunctionResolution standardFunctionResolution = new FunctionResolution(functionAndTypeManager.getFunctionAndTypeResolver());
-    protected static final Metadata metadata = MetadataManager.createTestMetadataManager();
+    protected static final Metadata metadata = new MetadataManager(
+            functionAndTypeManager,
+            new BlockEncodingManager(),
+            createTestingSessionPropertyManager(),
+            new SchemaPropertyManager(),
+            new TablePropertyManager(),
+            new ColumnPropertyManager(),
+            new AnalyzePropertyManager(),
+            createTestTransactionManager(new CatalogManager()));
 
     protected static final ClpColumnHandle city = new ClpColumnHandle("city", RowType.from(ImmutableList.of(
             RowType.field("Name", VARCHAR),

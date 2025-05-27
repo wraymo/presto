@@ -208,4 +208,12 @@ public class TestClpPlanOptimizer
                 Optional.of("lower(city.Region.Name) = 'hello world' OR city.Name IS NULL"),
                 sessionHolder);
     }
+
+    @Test
+    public void testClpUdf()
+    {
+        SessionHolder sessionHolder = new SessionHolder();
+        testFilter("CLP_GET_STRING('city.Name') = 'Beijing'", Optional.of("city.Name: \"Beijing\""),
+                Optional.empty(), sessionHolder);
+    }
 }

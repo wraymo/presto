@@ -46,7 +46,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 public class ClpMetadata
         implements ConnectorMetadata
 {
-    private static final String DEFAULT_SCHEMA_NAME = "default";
+    public static final String DEFAULT_SCHEMA_NAME = "default";
     private final ClpMetadataProvider clpMetadataProvider;
     private final LoadingCache<SchemaTableName, List<ClpColumnHandle>> columnHandleCache;
     private final LoadingCache<String, List<ClpTableHandle>> tableHandleCache;
