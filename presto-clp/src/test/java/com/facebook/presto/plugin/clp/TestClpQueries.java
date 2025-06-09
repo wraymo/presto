@@ -15,9 +15,11 @@ package com.facebook.presto.plugin.clp;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.common.transaction.TransactionId;
+import com.facebook.presto.cost.PlanNodeStatsEstimate;
 import com.facebook.presto.plugin.clp.metadata.ClpNodeType;
 import com.facebook.presto.spi.WarningCollector;
 import com.facebook.presto.sql.planner.Plan;
+import com.facebook.presto.sql.planner.assertions.PlanAssert;
 import com.facebook.presto.testing.QueryRunner;
 import com.facebook.presto.tests.AbstractTestQueryFramework;
 import com.facebook.presto.tests.DistributedQueryRunner;
@@ -36,6 +38,11 @@ import java.sql.Statement;
 import java.util.Arrays;
 import java.util.List;
 
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.anyTree;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.expression;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.filter;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.project;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.tableScan;
 import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
 import static org.testng.Assert.fail;
 
@@ -141,9 +148,49 @@ public class TestClpQueries
 
         Plan plan = getQueryRunner().createPlan(
                 session,
-//                "SELECT CLP_GET_STRING('city.Name') FROM test WHERE CLP_GET_INT('city.Region.Id') = 1",
-                "SELECT a_bigint, c.e FROM test where c.d = true AND a_varchar = 'cc'",
+                "SELECT CLP_GET_STRING('city.Name') FROM test WHERE CLP_GET_INT('city.Region.Id') = 1",
+//                "SELECT a_bigint, c.e FROM test where c.d = true AND a_varchar = 'cc'",
                 WarningCollector.NOOP);
+        PlanAssert.assertPlan(
+                session,
+                getQueryRunner().getMetadata(),
+                (node, sourceStats, lookup, s, types) -> PlanNodeStatsEstimate.unknown(),
+                plan,
+                anyTree(project(
+                            ImmutableMap.of(
+                            "a_bigint", expression("a_bigint"),
+                            "c.e", expression("c.e")),
+                            filter(
+                "((dereference(c, 'd') = true) AND (a_varchar = CAST('cc' AS VARCHAR)))",
+                                tableScan("test", ImmutableMap.of(
+                                    "a_bigint", "a_bigint",
+                                    "a_varchar", "a_varchar",
+                                    "c", "c"))))));
+
+//        assertPlan(
+//                "SELECT a_bigint, c.e FROM test where c.d = true AND a_varchar = 'cc'",
+//                anyTree(project(
+//                        ImmutableMap.of("a_bigint", expression("a_bigint"), // output symbols and their expressions
+//                                        "c.e", expression("c.e")),
+//                        filter(
+//                                "(\"c.d\" = true) AND (\"a_varchar\" = CAST('cc' AS VARCHAR))",
+//                                tableScan("test", ImmutableMap.of(
+//                                        "a_bigint", "a_bigint",
+//                                        "c.e", "c.e",
+//                                        "c.d", "c.d",
+//                                        "a_varchar", "a_varchar"))))));
+//        assertPlan(
+//                "SELECT a_bigint, c.e FROM test WHERE c.d = true AND a_varchar = 'cc'",
+//                anyTree(
+//                        scanFilterProject(
+//                                tableScan("test", ImmutableMap.of(
+//                                        "a_bigint", "a_bigint",
+//                                        "a_varchar", "a_varchar",
+//                                        "c", "c")),
+//                                ImmutableMap.of(
+//                                        "expr", expression("dereference(c, 1)"), // this matches the 'expr := DEREFERENCE(c, 1)' from the real plan
+//                                        "a_bigint", expression("a_bigint")),
+//                                expression("((a_varchar = CAST('cc' AS VARCHAR)) AND (dereference(c, 0) = true))"))));
     }
 
 //    private Plan getQueryPlan(String sql)

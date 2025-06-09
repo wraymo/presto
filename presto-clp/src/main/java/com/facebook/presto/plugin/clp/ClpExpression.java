@@ -16,7 +16,6 @@ package com.facebook.presto.plugin.clp;
 import com.facebook.presto.spi.relation.RowExpression;
 
 import java.util.Optional;
-
 /**
  * Represents the result of converting a Presto RowExpression into a CLP-compatible KQL query.
  * There are three possible cases:
