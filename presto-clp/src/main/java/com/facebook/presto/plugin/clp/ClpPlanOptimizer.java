@@ -84,7 +84,7 @@ public class ClpPlanOptimizer
         public PlanNode visitProject(ProjectNode node, RewriteContext<Void> context)
         {
             Assignments.Builder assignmentsBuilder = new Assignments.Builder();
-            List<VariableReferenceExpression> clpVariableList = new ArrayList<>();
+            Set<VariableReferenceExpression> clpUdfVariablesInProjectNode = new HashSet<>();
             for (Map.Entry<VariableReferenceExpression, RowExpression> entry : node.getAssignments().getMap().entrySet()) {
                 VariableReferenceExpression oldKey = entry.getKey();
                 RowExpression oldValue = entry.getValue();
@@ -110,17 +110,22 @@ public class ClpPlanOptimizer
                 }
                 String jsonPath = ((Slice) ((ConstantExpression) argument).getValue()).toStringUtf8();
 
-                VariableReferenceExpression newKey = new VariableReferenceExpression(oldKey.getSourceLocation(), jsonPath, oldKey.getType());
-                VariableReferenceExpression newValue = new VariableReferenceExpression(oldKey.getSourceLocation(), jsonPath, oldKey.getType());
-                assignmentsBuilder.put(newKey, newValue);
-                clpVariableList.add(newKey);
+                VariableReferenceExpression newValue = new VariableReferenceExpression(oldValue.getSourceLocation(),
+                        jsonPath, oldValue.getType());
+                assignmentsBuilder.put(oldKey, newValue);
+                clpUdfVariablesInProjectNode.add(newValue);
             }
 
             PlanNode childNode = node.getSource();
             // Handle Project -> TableScan
             if (childNode instanceof TableScanNode) {
-                TableScanNode newTableScanNode = buildNewTableScanNode((TableScanNode) childNode, clpVariableList);
-                return new ProjectNode(idAllocator.getNextId(), newTableScanNode, assignmentsBuilder.build());
+                TableScanNode newTableScanNode = buildNewTableScanNode((TableScanNode) childNode, clpUdfVariablesInProjectNode);
+                return new ProjectNode(
+                        newTableScanNode.getSourceLocation(),
+                        idAllocator.getNextId(),
+                        newTableScanNode,
+                        assignmentsBuilder.build(),
+                        node.getLocality());
             }
 
             // Handle Project -> Filter -> TableScan
@@ -128,21 +133,28 @@ public class ClpPlanOptimizer
                 FilterNode filterNode = (FilterNode) childNode;
                 TableScanNode tableScanNode = (TableScanNode) filterNode.getSource();
 
-                // Build new TableScanNode with CLP_GET pushes (even if empty)
-                TableScanNode newTableScanNode = buildNewTableScanNode(tableScanNode, clpVariableList);
+                // Build new TableScanNode with CLP_GET projection pushes (even if empty)
+                TableScanNode newTableScanNode = buildNewTableScanNode(tableScanNode, clpUdfVariablesInProjectNode);
+                log.info(clpUdfVariablesInProjectNode.toString());
+                log.info(newTableScanNode.toString());
 
                 // Apply KQL pushdown for the FilterNode
                 Map<VariableReferenceExpression, ColumnHandle> assignments = newTableScanNode.getAssignments();
                 TableHandle tableHandle = newTableScanNode.getTable();
                 ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle.getConnectorHandle();
 
-                Set<VariableReferenceExpression> clpUdfVariables = new HashSet<>();
+                Set<VariableReferenceExpression> clpUdfVariablesInFilterNode = new HashSet<>();
                 ClpExpression clpExpression = filterNode.getPredicate().accept(
                         new ClpFilterToKqlConverter(functionResolution, functionManager, assignments),
-                        clpUdfVariables);
+                        clpUdfVariablesInFilterNode);
 
                 Optional<String> kqlQuery = clpExpression.getDefinition();
                 Optional<RowExpression> remainingPredicate = clpExpression.getRemainingExpression();
+
+                if (!clpUdfVariablesInFilterNode.isEmpty()) {
+                    newTableScanNode = buildNewTableScanNode(newTableScanNode, clpUdfVariablesInFilterNode);
+                    log.info(newTableScanNode.toString());
+                }
 
                 if (kqlQuery.isPresent()) {
                     // Apply KQL to layout
@@ -180,28 +192,30 @@ public class ClpPlanOptimizer
                     newSourceNode = newTableScanNode;
                 }
 
-                return new ProjectNode(idAllocator.getNextId(), newSourceNode, assignmentsBuilder.build());
+                return new ProjectNode(
+                        newSourceNode.getSourceLocation(),
+                        idAllocator.getNextId(),
+                        newSourceNode,
+                        assignmentsBuilder.build(),
+                        node.getLocality());
             }
-            if (clpVariableList.isEmpty()) {
+            if (clpUdfVariablesInProjectNode.isEmpty()) {
                 return node;
             }
             throw new PrestoException(CLP_PUSHDOWN_UNSUPPORTED_EXPRESSION,
                     "Unsupported plan shape for CLP pushdown: " + childNode.getClass().getSimpleName());
         }
 
-        private TableScanNode buildNewTableScanNode(TableScanNode tableScanNode, List<VariableReferenceExpression> clpVariableList)
+        private TableScanNode buildNewTableScanNode(
+                TableScanNode tableScanNode,
+                Set<VariableReferenceExpression> clpUdfVariables)
         {
             List<VariableReferenceExpression> newOutputVariables = new ArrayList<>(tableScanNode.getOutputVariables());
             Map<VariableReferenceExpression, ColumnHandle> newAssignments = new HashMap<>(tableScanNode.getAssignments());
-            for (VariableReferenceExpression var : clpVariableList) {
+            for (VariableReferenceExpression var : clpUdfVariables) {
                 newOutputVariables.add(var);
-                newAssignments.put(var, new ClpColumnHandle(var.getName(), var.getName(), var.getType(), true));
+                newAssignments.put(var, new ClpColumnHandle(var.getName(), var.getType(), true));
             }
-            log.debug("Original output variables: %s", tableScanNode.getOutputVariables());
-            log.debug("CLP variable list: %s", clpVariableList);
-            log.debug("New output variables: %s", newOutputVariables);
-            log.debug("Original assignments: %s", tableScanNode.getAssignments().keySet());
-            log.debug("New assignments: %s", newAssignments.keySet());
 
             return new TableScanNode(
                     tableScanNode.getSourceLocation(),

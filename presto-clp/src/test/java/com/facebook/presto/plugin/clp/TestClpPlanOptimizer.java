@@ -14,8 +14,10 @@
 package com.facebook.presto.plugin.clp;
 
 import com.facebook.presto.spi.relation.RowExpression;
+import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import org.testng.annotations.Test;
 
+import java.util.HashSet;
 import java.util.Optional;
 
 import static org.testng.Assert.assertEquals;
@@ -30,11 +32,12 @@ public class TestClpPlanOptimizer
                             Optional<String> expectedRemainingExpression, SessionHolder sessionHolder)
     {
         RowExpression pushDownExpression = getRowExpression(sqlExpression, sessionHolder);
+        HashSet<VariableReferenceExpression> clpUdfVariables = new HashSet<>();
         ClpExpression clpExpression = pushDownExpression.accept(new ClpFilterToKqlConverter(
                         standardFunctionResolution,
                         functionAndTypeManager,
                         variableToColumnHandleMap),
-                null);
+                clpUdfVariables);
         Optional<String> kqlExpression = clpExpression.getDefinition();
         Optional<RowExpression> remainingExpression = clpExpression.getRemainingExpression();
         if (expectedKqlExpression.isPresent()) {

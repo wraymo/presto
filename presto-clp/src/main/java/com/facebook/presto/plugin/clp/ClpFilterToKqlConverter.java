@@ -34,6 +34,7 @@ import com.google.common.collect.ImmutableSet;
 import io.airlift.slice.Slice;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -83,7 +84,7 @@ public class ClpFilterToKqlConverter
         this.standardFunctionResolution =
                 requireNonNull(standardFunctionResolution, "standardFunctionResolution is null");
         this.functionMetadataManager = requireNonNull(functionMetadataManager, "function metadata manager is null");
-        this.assignments = requireNonNull(assignments, "assignments is null");
+        this.assignments = new HashMap<>(requireNonNull(assignments, "assignments is null"));
     }
 
     @Override
@@ -198,7 +199,7 @@ public class ClpFilterToKqlConverter
         ArrayList<RowExpression> remainingExpressions = new ArrayList<>();
         boolean hasDefinition = false;
         for (RowExpression argument : node.getArguments()) {
-            ClpExpression expression = argument.accept(this, null);
+            ClpExpression expression = argument.accept(this, context);
             if (expression.getDefinition().isPresent()) {
                 hasDefinition = true;
                 queryBuilder.append(expression.getDefinition().get());
@@ -699,6 +700,7 @@ public class ClpFilterToKqlConverter
 
     private RowExpression maybeReplaceClpUdfArgument(RowExpression rowExpression, Set<VariableReferenceExpression> context)
     {
+        requireNonNull(context);
         if (!(rowExpression instanceof CallExpression)) {
             return rowExpression;
         }
