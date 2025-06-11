@@ -735,11 +735,13 @@ public class ClpFilterToKqlConverter
                     return newVar;
                 }
                 else {
-                    throw new PrestoException(CLP_PUSHDOWN_UNSUPPORTED_EXPRESSION, "Unrecognized parameter in " + functionName);
+                    throw new PrestoException(CLP_PUSHDOWN_UNSUPPORTED_EXPRESSION,
+                            "Unrecognized parameter in " + functionName);
                 }
             }
             else {
-                throw new PrestoException(CLP_PUSHDOWN_UNSUPPORTED_EXPRESSION, "Only one parameter is accepted in " + functionName);
+                throw new PrestoException(CLP_PUSHDOWN_UNSUPPORTED_EXPRESSION,
+                        "Only one parameter is accepted in " + functionName);
             }
         }
 

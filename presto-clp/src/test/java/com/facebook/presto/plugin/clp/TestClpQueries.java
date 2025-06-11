@@ -143,7 +143,9 @@ public class TestClpQueries
 
         Plan plan = getQueryRunner().createPlan(
                 session,
-                "SELECT CLP_GET_STRING('city.Name') FROM test WHERE CLP_GET_INT('city.Region.Id') = 1",
+//                "SELECT CLP_GET_STRING('city.Name') FROM test WHERE CLP_GET_INT('city.Region.Id') = 1",
+
+                "SELECT * FROM test WHERE CLP_GET_INT('city.Region.Id') = 1",
                 WarningCollector.NOOP);
         log.info(plan.toString());
 //        PlanAssert.assertPlan(

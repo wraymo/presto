@@ -14,6 +14,7 @@
 package com.facebook.presto.plugin.clp;
 
 import com.facebook.airlift.log.Logger;
+import com.facebook.presto.expressions.DefaultRowExpressionTraversalVisitor;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorPlanOptimizer;
 import com.facebook.presto.spi.ConnectorPlanRewriter;
@@ -32,6 +33,7 @@ import com.facebook.presto.spi.plan.TableScanNode;
 import com.facebook.presto.spi.relation.CallExpression;
 import com.facebook.presto.spi.relation.ConstantExpression;
 import com.facebook.presto.spi.relation.RowExpression;
+import com.facebook.presto.spi.relation.RowExpressionVisitor;
 import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import io.airlift.slice.Slice;
 
@@ -139,59 +141,7 @@ public class ClpPlanOptimizer
                 log.info(newTableScanNode.toString());
 
                 // Apply KQL pushdown for the FilterNode
-                Map<VariableReferenceExpression, ColumnHandle> assignments = newTableScanNode.getAssignments();
-                TableHandle tableHandle = newTableScanNode.getTable();
-                ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle.getConnectorHandle();
-
-                Set<VariableReferenceExpression> clpUdfVariablesInFilterNode = new HashSet<>();
-                ClpExpression clpExpression = filterNode.getPredicate().accept(
-                        new ClpFilterToKqlConverter(functionResolution, functionManager, assignments),
-                        clpUdfVariablesInFilterNode);
-
-                Optional<String> kqlQuery = clpExpression.getDefinition();
-                Optional<RowExpression> remainingPredicate = clpExpression.getRemainingExpression();
-
-                if (!clpUdfVariablesInFilterNode.isEmpty()) {
-                    newTableScanNode = buildNewTableScanNode(newTableScanNode, clpUdfVariablesInFilterNode);
-                    log.info(newTableScanNode.toString());
-                }
-
-                if (kqlQuery.isPresent()) {
-                    // Apply KQL to layout
-                    ClpTableLayoutHandle layoutHandle = new ClpTableLayoutHandle(clpTableHandle, kqlQuery);
-
-                    TableHandle newTableHandle = new TableHandle(
-                            tableHandle.getConnectorId(),
-                            clpTableHandle,
-                            tableHandle.getTransaction(),
-                            Optional.of(layoutHandle));
-
-                    newTableScanNode = new TableScanNode(
-                            newTableScanNode.getSourceLocation(),
-                            idAllocator.getNextId(),
-                            newTableHandle,
-                            newTableScanNode.getOutputVariables(),
-                            newTableScanNode.getAssignments(),
-                            newTableScanNode.getTableConstraints(),
-                            newTableScanNode.getCurrentConstraint(),
-                            newTableScanNode.getEnforcedConstraint(),
-                            newTableScanNode.getCteMaterializationInfo());
-                }
-
-                PlanNode newSourceNode;
-                if (remainingPredicate.isPresent()) {
-                    // Not all predicate pushed down, need new FilterNode
-                    newSourceNode = new FilterNode(
-                            filterNode.getSourceLocation(),
-                            idAllocator.getNextId(),
-                            newTableScanNode,
-                            remainingPredicate.get());
-                }
-                else {
-                    // All pushed into scan
-                    newSourceNode = newTableScanNode;
-                }
-
+                PlanNode newSourceNode = processFilter(filterNode, newTableScanNode);
                 return new ProjectNode(
                         newSourceNode.getSourceLocation(),
                         idAllocator.getNextId(),
@@ -229,49 +179,85 @@ public class ClpPlanOptimizer
                     tableScanNode.getCteMaterializationInfo());
         }
 
-//        @Override
-//        public PlanNode visitFilter(FilterNode node, RewriteContext<Void> context)
-//        {
-//            if (!(node.getSource() instanceof TableScanNode)) {
-//                return node;
-//            }
-//
-//            TableScanNode tableScanNode = (TableScanNode) node.getSource();
-//            Map<VariableReferenceExpression, ColumnHandle> assignments = tableScanNode.getAssignments();
-//            TableHandle tableHandle = tableScanNode.getTable();
-//            ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle.getConnectorHandle();
-//            ClpExpression clpExpression = node.getPredicate()
-//                    .accept(new ClpFilterToKqlConverter(functionResolution, functionManager, assignments),
-//                            null);
-//            Optional<String> kqlQuery = clpExpression.getDefinition();
-//            Optional<RowExpression> remainingPredicate = clpExpression.getRemainingExpression();
-//            if (!kqlQuery.isPresent()) {
-//                return node;
-//            }
-//            log.debug("KQL query: %s", kqlQuery.get());
-//            ClpTableLayoutHandle clpTableLayoutHandle = new ClpTableLayoutHandle(clpTableHandle, kqlQuery);
-//            TableScanNode newTableScanNode = new TableScanNode(
-//                    tableScanNode.getSourceLocation(),
-//                    idAllocator.getNextId(),
-//                    new TableHandle(
-//                            tableHandle.getConnectorId(),
-//                            clpTableHandle,
-//                            tableHandle.getTransaction(),
-//                            Optional.of(clpTableLayoutHandle)),
-//                    tableScanNode.getOutputVariables(),
-//                    tableScanNode.getAssignments(),
-//                    tableScanNode.getTableConstraints(),
-//                    tableScanNode.getCurrentConstraint(),
-//                    tableScanNode.getEnforcedConstraint(),
-//                    tableScanNode.getCteMaterializationInfo());
-//            if (!remainingPredicate.isPresent()) {
-//                return newTableScanNode;
-//            }
-//
-//            return new FilterNode(node.getSourceLocation(),
-//                    idAllocator.getNextId(),
-//                    newTableScanNode,
-//                    remainingPredicate.get());
-//        }
+        @Override
+        public PlanNode visitFilter(FilterNode node, RewriteContext<Void> context)
+        {
+            if (!(node.getSource() instanceof TableScanNode)) {
+                return node;
+            }
+
+            return processFilter(node, (TableScanNode) node.getSource());
+        }
+
+        private PlanNode processFilter(FilterNode filterNode, TableScanNode tableScanNode)
+        {
+            Map<VariableReferenceExpression, ColumnHandle> assignments = tableScanNode.getAssignments();
+            TableHandle tableHandle = tableScanNode.getTable();
+            ClpTableHandle clpTableHandle = (ClpTableHandle) tableHandle.getConnectorHandle();
+
+            Set<VariableReferenceExpression> clpUdfVariablesInFilterNode = new HashSet<>();
+            ClpExpression clpExpression = filterNode.getPredicate().accept(
+                    new ClpFilterToKqlConverter(functionResolution, functionManager, assignments),
+                    clpUdfVariablesInFilterNode);
+
+            Optional<String> kqlQuery = clpExpression.getDefinition();
+            Optional<RowExpression> remainingPredicate = clpExpression.getRemainingExpression();
+
+            if (remainingPredicate.isPresent()) {
+                // Collect all variables actually present in the remainingPredicate
+                Set<VariableReferenceExpression> variablesInPredicate = new HashSet<>();
+
+                RowExpressionVisitor<Void, Void> visitor = new DefaultRowExpressionTraversalVisitor<Void>() {
+                    @Override
+                    public Void visitVariableReference(VariableReferenceExpression variable, Void context) {
+                        variablesInPredicate.add(variable);
+                        return null;
+                    }
+                };
+
+                remainingPredicate.get().accept(visitor, null);
+                // Retain only the variables that also exist in the remainingPredicate
+                clpUdfVariablesInFilterNode.retainAll(variablesInPredicate);
+            }
+
+            if (!clpUdfVariablesInFilterNode.isEmpty()) {
+                tableScanNode = buildNewTableScanNode(tableScanNode, clpUdfVariablesInFilterNode);
+                log.info(tableScanNode.toString());
+            }
+
+            if (kqlQuery.isPresent()) {
+                // Apply KQL to layout
+                ClpTableLayoutHandle layoutHandle = new ClpTableLayoutHandle(clpTableHandle, kqlQuery);
+
+                TableHandle newTableHandle = new TableHandle(
+                        tableHandle.getConnectorId(),
+                        clpTableHandle,
+                        tableHandle.getTransaction(),
+                        Optional.of(layoutHandle));
+
+                tableScanNode = new TableScanNode(
+                        tableScanNode.getSourceLocation(),
+                        idAllocator.getNextId(),
+                        newTableHandle,
+                        tableScanNode.getOutputVariables(),
+                        tableScanNode.getAssignments(),
+                        tableScanNode.getTableConstraints(),
+                        tableScanNode.getCurrentConstraint(),
+                        tableScanNode.getEnforcedConstraint(),
+                        tableScanNode.getCteMaterializationInfo());
+            }
+
+            if (remainingPredicate.isPresent()) {
+                // Not all predicate pushed down, need new FilterNode
+                return new FilterNode(
+                        filterNode.getSourceLocation(),
+                        idAllocator.getNextId(),
+                        tableScanNode,
+                        remainingPredicate.get());
+            }
+            else {
+                return tableScanNode;
+            }
+        }
     }
 }
