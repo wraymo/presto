@@ -137,8 +137,6 @@ public class ClpPlanOptimizer
 
                 // Build new TableScanNode with CLP_GET projection pushes (even if empty)
                 TableScanNode newTableScanNode = buildNewTableScanNode(tableScanNode, clpUdfVariablesInProjectNode);
-                log.info(clpUdfVariablesInProjectNode.toString());
-                log.info(newTableScanNode.toString());
 
                 // Apply KQL pushdown for the FilterNode
                 PlanNode newSourceNode = processFilter(filterNode, newTableScanNode);
@@ -209,7 +207,8 @@ public class ClpPlanOptimizer
 
                 RowExpressionVisitor<Void, Void> visitor = new DefaultRowExpressionTraversalVisitor<Void>() {
                     @Override
-                    public Void visitVariableReference(VariableReferenceExpression variable, Void context) {
+                    public Void visitVariableReference(VariableReferenceExpression variable, Void context)
+                    {
                         variablesInPredicate.add(variable);
                         return null;
                     }
@@ -222,7 +221,6 @@ public class ClpPlanOptimizer
 
             if (!clpUdfVariablesInFilterNode.isEmpty()) {
                 tableScanNode = buildNewTableScanNode(tableScanNode, clpUdfVariablesInFilterNode);
-                log.info(tableScanNode.toString());
             }
 
             if (kqlQuery.isPresent()) {

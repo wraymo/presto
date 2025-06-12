@@ -64,8 +64,9 @@ import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.node;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.project;
 import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
 
+@Test(singleThreaded = true)
 public class TestClpPlanOptimizer
-    extends TestClpQueryBase
+        extends TestClpQueryBase
 {
     private static final Logger log = Logger.get(TestClpPlanOptimizer.class);
     private final String databaseName = "metadata_query_testdb";
@@ -110,11 +111,13 @@ public class TestClpPlanOptimizer
     @AfterMethod
     public void tearDown()
     {
+        localQueryRunner.close();
         clpMetadataDbSetUp.tearDown(databaseName);
     }
 
     @Test
-    public void testScanProjectFilter() {
+    public void testScanProjectFilter()
+    {
         TransactionId transactionId = localQueryRunner.getTransactionManager().beginTransaction(false);
         Session session = testSessionBuilder()
                 .setCatalog("clp")
@@ -142,14 +145,16 @@ public class TestClpPlanOptimizer
                     project(
                             ImmutableMap.of(
                                     "clp_get_string",
-                                    PlanMatchPattern.expression("user")
-                            ),
+                                    PlanMatchPattern.expression("user")),
                             filter(
                                     expression("lower(city.Name) = 'BEIJING'"),
                                     ClpTableScanMatcher.clpTableScanPattern(
                                             new ClpTableLayoutHandle(table, Optional.of("(user_id: 0)")),
                                             ImmutableSet.of(
-                                                    new ClpColumnHandle("user", VarcharType.VARCHAR, true),
+                                                    new ClpColumnHandle(
+                                                            "user",
+                                                            VarcharType.VARCHAR,
+                                                            true),
                                                     city))))));
     }
 
@@ -179,19 +184,22 @@ public class TestClpPlanOptimizer
                 localQueryRunner.getMetadata(),
                 (node, sourceStats, lookup, s, types) -> PlanNodeStatsEstimate.unknown(),
                 new Plan(optimizedPlan, plan.getTypes(), StatsAndCosts.empty()),
-                anyTree(project(
-                        ImmutableMap.of(
-                                "clp_get_string",
-                                PlanMatchPattern.expression("user")
-                        ),
-                        ClpTableScanMatcher.clpTableScanPattern(
-                                new ClpTableLayoutHandle(
-                                        new ClpTableHandle(
-                                                new SchemaTableName("default", "test"),
-                                                ClpTableHandle.StorageType.FS),
-                                        Optional.empty()),
-                                ImmutableSet.of(new ClpColumnHandle("user", VarcharType.VARCHAR, true))
-                        ))));
+                anyTree(
+                        project(
+                            ImmutableMap.of(
+                                    "clp_get_string",
+                                    PlanMatchPattern.expression("user")),
+                            ClpTableScanMatcher.clpTableScanPattern(
+                                    new ClpTableLayoutHandle(
+                                            new ClpTableHandle(
+                                                    new SchemaTableName("default", "test"),
+                                                    ClpTableHandle.StorageType.FS),
+                                            Optional.empty()),
+                                    ImmutableSet.of(
+                                            new ClpColumnHandle(
+                                                    "user",
+                                                    VarcharType.VARCHAR,
+                                                    true))))));
     }
 
     @Test
@@ -206,7 +214,7 @@ public class TestClpPlanOptimizer
 
         Plan plan = localQueryRunner.createPlan(
                 session,
-                "SELECT CLP_GET_STRING('user') FROM test",
+                "SELECT * FROM test WHERE CLP_GET_INT('user_id') = 0 AND LOWER(city.Name) = 'BEIJING'",
                 WarningCollector.NOOP);
         ClpPlanOptimizer optimizer = new ClpPlanOptimizer(functionAndTypeManager, functionResolution);
         PlanNode optimizedPlan = optimizer.optimize(
@@ -220,19 +228,12 @@ public class TestClpPlanOptimizer
                 localQueryRunner.getMetadata(),
                 (node, sourceStats, lookup, s, types) -> PlanNodeStatsEstimate.unknown(),
                 new Plan(optimizedPlan, plan.getTypes(), StatsAndCosts.empty()),
-                anyTree(project(
-                        ImmutableMap.of(
-                                "clp_get_string",
-                                PlanMatchPattern.expression("user")
-                        ),
-                        ClpTableScanMatcher.clpTableScanPattern(
-                                new ClpTableLayoutHandle(
-                                        new ClpTableHandle(
-                                                new SchemaTableName("default", "test"),
-                                                ClpTableHandle.StorageType.FS),
-                                        Optional.empty()),
-                                ImmutableSet.of(new ClpColumnHandle("user", VarcharType.VARCHAR, true))
-                        ))));
+                anyTree(
+                        filter(
+                                expression("lower(city.Name) = 'BEIJING'"),
+                                ClpTableScanMatcher.clpTableScanPattern(
+                                        new ClpTableLayoutHandle(table, Optional.of("(user_id: 0)")),
+                                        ImmutableSet.of(city, fare, isHoliday)))));
     }
 
     private static final class ClpTableScanMatcher

@@ -1,3 +1,16 @@
+/*
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.facebook.presto.plugin.clp;
 
 import com.facebook.presto.plugin.clp.metadata.ClpMetadataProvider;
@@ -17,7 +30,8 @@ import java.util.Map;
 
 import static org.testng.Assert.fail;
 
-public final class ClpMetadataDbSetUp {
+public final class ClpMetadataDbSetUp
+{
     public static final String metadataDbUrlTemplate =
             "jdbc:h2:file:/tmp/%s;MODE=MySQL;DATABASE_TO_UPPER=FALSE";
     public static final String metadataDbTablePrefix = "clp_";
@@ -28,13 +42,14 @@ public final class ClpMetadataDbSetUp {
     public ClpMetadata setupMetadata(String dbName, Map<String, List<Pair<String, ClpNodeType>>> clpFields)
     {
         final String metadataDbUrl = String.format(metadataDbUrlTemplate, dbName);
+        System.out.println(metadataDbUrl);
         final String columnMetadataTableSuffix = "_column_metadata";
 
         try (Connection conn = DriverManager.getConnection(metadataDbUrl, metadataDbUser, metadataDbPassword);
-             Statement stmt = conn.createStatement()) {
+                Statement stmt = conn.createStatement()) {
             createDatasetsTable(stmt);
 
-            for (Map.Entry<String, List<Pair<String, ClpNodeType>>> entry: clpFields.entrySet()) {
+            for (Map.Entry<String, List<Pair<String, ClpNodeType>>> entry : clpFields.entrySet()) {
                 String tableName = entry.getKey();
                 String columnMetadataTableName = metadataDbTablePrefix + tableName + columnMetadataTableSuffix;
                 String createColumnMetadataSQL = String.format(
@@ -78,11 +93,11 @@ public final class ClpMetadataDbSetUp {
         final String archiveTableFormat = metadataDbTablePrefix + "%s" + archiveTableSuffix;
 
         try (Connection conn = DriverManager.getConnection(metadataDbUrl, metadataDbUser, metadataDbPassword);
-             Statement stmt = conn.createStatement()) {
+                Statement stmt = conn.createStatement()) {
             createDatasetsTable(stmt);
 
             // Create and populate archive tables
-            for (Map.Entry<String, List<String>> tableSplits: splits.entrySet()) {
+            for (Map.Entry<String, List<String>> tableSplits : splits.entrySet()) {
                 String tableName = tableSplits.getKey();
                 updateDatasetsTable(conn, tableName);
 
@@ -97,7 +112,7 @@ public final class ClpMetadataDbSetUp {
 
                 String insertArchiveTableSQL = String.format("INSERT INTO %s (id) VALUES (?)", archiveTableName);
                 try (PreparedStatement pstmt = conn.prepareStatement(insertArchiveTableSQL)) {
-                    for (String splitPath: tableSplits.getValue()) {
+                    for (String splitPath : tableSplits.getValue()) {
                         pstmt.setString(1, splitPath);
                         pstmt.addBatch();
                     }
@@ -120,8 +135,8 @@ public final class ClpMetadataDbSetUp {
 
     public void tearDown(String dbName)
     {
-        File dbFile = new File("/tmp/metadata_testdb.mv.db");
-        File lockFile = new File("/tmp/metadata_testdb.trace.db"); // Optional, H2 sometimes creates this
+        File dbFile = new File(String.format("/tmp/%s.mv.db", dbName));
+        File lockFile = new File(String.format("/tmp/%s.trace.db", dbName)); // Optional, H2 sometimes creates this
         if (dbFile.exists()) {
             dbFile.delete();
             System.out.println("Deleted database file: " + dbFile.getAbsolutePath());
