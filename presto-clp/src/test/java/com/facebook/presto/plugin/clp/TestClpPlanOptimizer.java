@@ -13,28 +13,22 @@
  */
 package com.facebook.presto.plugin.clp;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.Session;
-import com.facebook.presto.common.QualifiedObjectName;
-import com.facebook.presto.common.type.RowType;
-import com.facebook.presto.common.type.TypeSignature;
+import com.facebook.presto.common.transaction.TransactionId;
 import com.facebook.presto.common.type.VarcharType;
 import com.facebook.presto.cost.PlanNodeStatsEstimate;
 import com.facebook.presto.cost.StatsAndCosts;
 import com.facebook.presto.cost.StatsProvider;
-import com.facebook.presto.metadata.BuiltInFunctionHandle;
+import com.facebook.presto.metadata.FunctionAndTypeManager;
 import com.facebook.presto.metadata.Metadata;
+import com.facebook.presto.plugin.clp.metadata.ClpNodeType;
 import com.facebook.presto.spi.ColumnHandle;
-import com.facebook.presto.spi.ConnectorId;
-import com.facebook.presto.spi.TableHandle;
-import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
-import com.facebook.presto.spi.function.FunctionKind;
-import com.facebook.presto.spi.function.Signature;
-import com.facebook.presto.spi.plan.Assignments;
+import com.facebook.presto.spi.SchemaTableName;
+import com.facebook.presto.spi.WarningCollector;
 import com.facebook.presto.spi.plan.PlanNode;
+import com.facebook.presto.spi.plan.PlanNodeIdAllocator;
 import com.facebook.presto.spi.plan.TableScanNode;
-import com.facebook.presto.spi.relation.CallExpression;
-import com.facebook.presto.spi.relation.ConstantExpression;
-import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.facebook.presto.sql.planner.Plan;
 import com.facebook.presto.sql.planner.assertions.MatchResult;
@@ -42,367 +36,162 @@ import com.facebook.presto.sql.planner.assertions.Matcher;
 import com.facebook.presto.sql.planner.assertions.PlanAssert;
 import com.facebook.presto.sql.planner.assertions.PlanMatchPattern;
 import com.facebook.presto.sql.planner.assertions.SymbolAliases;
-import com.facebook.presto.sql.planner.iterative.rule.test.PlanBuilder;
-
+import com.facebook.presto.sql.relational.FunctionResolution;
 import com.facebook.presto.sql.tree.SymbolReference;
+import com.facebook.presto.testing.LocalQueryRunner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import io.airlift.slice.Slices;
+import org.apache.commons.math3.util.Pair;
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import static com.facebook.presto.common.Utils.checkState;
-import static com.facebook.presto.common.type.BigintType.BIGINT;
-import static com.facebook.presto.common.type.VarcharType.VARCHAR;
+import static com.facebook.presto.metadata.FunctionExtractor.extractFunctions;
+import static com.facebook.presto.plugin.clp.ClpMetadataDbSetUp.metadataDbPassword;
+import static com.facebook.presto.plugin.clp.ClpMetadataDbSetUp.metadataDbTablePrefix;
+import static com.facebook.presto.plugin.clp.ClpMetadataDbSetUp.metadataDbUrlTemplate;
+import static com.facebook.presto.plugin.clp.ClpMetadataDbSetUp.metadataDbUser;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.anyTree;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.filter;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.node;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.project;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertTrue;
+import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
 
-@Test
 public class TestClpPlanOptimizer
-        extends TestClpQueryBase
+    extends TestClpQueryBase
 {
-    private void testFilter(String sqlExpression, Optional<String> expectedKqlExpression,
-                            Optional<String> expectedRemainingExpression, SessionHolder sessionHolder)
-    {
-        RowExpression pushDownExpression = getRowExpression(sqlExpression, sessionHolder);
-        HashSet<VariableReferenceExpression> clpUdfVariables = new HashSet<>();
-        ClpExpression clpExpression = pushDownExpression.accept(new ClpFilterToKqlConverter(
-                        standardFunctionResolution,
-                        functionAndTypeManager,
-                        variableToColumnHandleMap),
-                clpUdfVariables);
-        Optional<String> kqlExpression = clpExpression.getDefinition();
-        Optional<RowExpression> remainingExpression = clpExpression.getRemainingExpression();
-        if (expectedKqlExpression.isPresent()) {
-            assertTrue(kqlExpression.isPresent());
-            assertEquals(kqlExpression.get(), expectedKqlExpression.get());
-        }
-        else {
-            assertFalse(kqlExpression.isPresent());
-        }
+    private static final Logger log = Logger.get(TestClpPlanOptimizer.class);
+    private final String databaseName = "metadata_query_testdb";
+    private final Session defaultSession = testSessionBuilder()
+            .setCatalog("clp")
+            .setSchema(ClpMetadata.DEFAULT_SCHEMA_NAME)
+            .build();
 
-        if (expectedRemainingExpression.isPresent()) {
-            assertTrue(remainingExpression.isPresent());
-            assertEquals(remainingExpression.get(), getRowExpression(expectedRemainingExpression.get(), sessionHolder));
-        }
-        else {
-            assertFalse(remainingExpression.isPresent());
-        }
+    private ClpMetadataDbSetUp clpMetadataDbSetUp;
+
+    private LocalQueryRunner localQueryRunner;
+    private FunctionAndTypeManager functionAndTypeManager;
+    private FunctionResolution functionResolution;
+    private PlanNodeIdAllocator planNodeIdAllocator;
+
+    @BeforeMethod
+    public void setUp()
+    {
+        clpMetadataDbSetUp = new ClpMetadataDbSetUp();
+        clpMetadataDbSetUp.setupMetadata(databaseName,
+                ImmutableMap.of(
+                        "test",
+                        ImmutableList.of(
+                                new Pair<>("city.Name", ClpNodeType.ClpString),
+                                new Pair<>("city.Region.Id", ClpNodeType.Integer),
+                                new Pair<>("city.Region.Name", ClpNodeType.VarString),
+                                new Pair<>("fare", ClpNodeType.Float),
+                                new Pair<>("isHoliday", ClpNodeType.Boolean))));
+
+        localQueryRunner = new LocalQueryRunner(defaultSession);
+        localQueryRunner.createCatalog("clp", new ClpConnectorFactory(), ImmutableMap.of(
+                "clp.metadata-db-url", String.format(metadataDbUrlTemplate, databaseName),
+                "clp.metadata-db-user", metadataDbUser,
+                "clp.metadata-db-password", metadataDbPassword,
+                "clp.metadata-table-prefix", metadataDbTablePrefix));
+        localQueryRunner.getMetadata().registerBuiltInFunctions(extractFunctions(new ClpPlugin().getFunctions()));
+        functionAndTypeManager = localQueryRunner.getMetadata().getFunctionAndTypeManager();
+        functionResolution = new FunctionResolution(functionAndTypeManager.getFunctionAndTypeResolver());
+        planNodeIdAllocator = new PlanNodeIdAllocator();
+    }
+
+    @AfterMethod
+    public void tearDown()
+    {
+        clpMetadataDbSetUp.tearDown(databaseName);
     }
 
     @Test
-    public void testStringMatchPushdown()
-    {
-        SessionHolder sessionHolder = new SessionHolder();
+    public void testScanProjectFilter() {
+        TransactionId transactionId = localQueryRunner.getTransactionManager().beginTransaction(false);
+        Session session = testSessionBuilder()
+                .setCatalog("clp")
+                .setSchema("default")
+                .setTransactionId(transactionId)
+                .build();
 
-        // Exact match
-        testFilter("city.Name = 'hello world'", Optional.of("city.Name: \"hello world\""), Optional.empty(), sessionHolder);
-        testFilter("'hello world' = city.Name", Optional.of("city.Name: \"hello world\""), Optional.empty(), sessionHolder);
-
-        // Like predicates that are transformed into substring match
-        testFilter("city.Name like 'hello%'", Optional.of("city.Name: \"hello*\""), Optional.empty(), sessionHolder);
-        testFilter("city.Name like '%hello'", Optional.of("city.Name: \"*hello\""), Optional.empty(), sessionHolder);
-
-        // Like predicates that are transformed into CARDINALITY(SPLIT(x, 'some string', 2)) = 2 form, and they are not pushed down for now
-        testFilter("city.Name like '%hello%'", Optional.empty(), Optional.of("city.Name like '%hello%'"), sessionHolder);
-
-        // Like predicates that are kept in the original forms
-        testFilter("city.Name like 'hello_'", Optional.of("city.Name: \"hello?\""), Optional.empty(), sessionHolder);
-        testFilter("city.Name like '_hello'", Optional.of("city.Name: \"?hello\""), Optional.empty(), sessionHolder);
-        testFilter("city.Name like 'hello_w%'", Optional.of("city.Name: \"hello?w*\""), Optional.empty(), sessionHolder);
-        testFilter("city.Name like '%hello_w'", Optional.of("city.Name: \"*hello?w\""), Optional.empty(), sessionHolder);
-        testFilter("city.Name like 'hello%world'", Optional.of("city.Name: \"hello*world\""), Optional.empty(), sessionHolder);
-        testFilter("city.Name like 'hello%wor%ld'", Optional.of("city.Name: \"hello*wor*ld\""), Optional.empty(), sessionHolder);
-    }
-
-    @Test
-    public void testSubStringPushdown()
-    {
-        SessionHolder sessionHolder = new SessionHolder();
-
-        testFilter("substr(city.Name, 1, 2) = 'he'", Optional.of("city.Name: \"he*\""), Optional.empty(), sessionHolder);
-        testFilter("substr(city.Name, 5, 2) = 'he'", Optional.of("city.Name: \"????he*\""), Optional.empty(), sessionHolder);
-        testFilter("substr(city.Name, 5) = 'he'", Optional.of("city.Name: \"????he\""), Optional.empty(), sessionHolder);
-        testFilter("substr(city.Name, -2) = 'he'", Optional.of("city.Name: \"*he\""), Optional.empty(), sessionHolder);
-
-        // Invalid substring index is not pushed down
-        testFilter("substr(city.Name, 1, 5) = 'he'", Optional.empty(), Optional.of("substr(city.Name, 1, 5) = 'he'"), sessionHolder);
-        testFilter("substr(city.Name, -5) = 'he'", Optional.empty(), Optional.of("substr(city.Name, -5) = 'he'"), sessionHolder);
-    }
-
-    @Test
-    public void testNumericComparisonPushdown()
-    {
-        SessionHolder sessionHolder = new SessionHolder();
-
-        testFilter("fare > 0", Optional.of("fare > 0"), Optional.empty(), sessionHolder);
-        testFilter("fare >= 0", Optional.of("fare >= 0"), Optional.empty(), sessionHolder);
-        testFilter("fare < 0", Optional.of("fare < 0"), Optional.empty(), sessionHolder);
-        testFilter("fare <= 0", Optional.of("fare <= 0"), Optional.empty(), sessionHolder);
-        testFilter("fare = 0", Optional.of("fare: 0"), Optional.empty(), sessionHolder);
-        testFilter("fare != 0", Optional.of("NOT fare: 0"), Optional.empty(), sessionHolder);
-        testFilter("fare <> 0", Optional.of("NOT fare: 0"), Optional.empty(), sessionHolder);
-        testFilter("0 < fare", Optional.of("fare > 0"), Optional.empty(), sessionHolder);
-        testFilter("0 <= fare", Optional.of("fare >= 0"), Optional.empty(), sessionHolder);
-        testFilter("0 > fare", Optional.of("fare < 0"), Optional.empty(), sessionHolder);
-        testFilter("0 >= fare", Optional.of("fare <= 0"), Optional.empty(), sessionHolder);
-        testFilter("0 = fare", Optional.of("fare: 0"), Optional.empty(), sessionHolder);
-        testFilter("0 != fare", Optional.of("NOT fare: 0"), Optional.empty(), sessionHolder);
-        testFilter("0 <> fare", Optional.of("NOT fare: 0"), Optional.empty(), sessionHolder);
-    }
-
-    @Test
-    public void testOrPushdown()
-    {
-        SessionHolder sessionHolder = new SessionHolder();
-
-        testFilter("fare > 0 OR city.Name like 'b%'", Optional.of("(fare > 0 OR city.Name: \"b*\")"), Optional.empty(),
-                sessionHolder);
-        testFilter("lower(city.Region.Name) = 'hello world' OR city.Region.Id != 1", Optional.empty(), Optional.of("(lower(city.Region.Name) = 'hello world' OR city.Region.Id != 1)"),
-                sessionHolder);
-
-        // Multiple ORs
-        testFilter("fare > 0 OR city.Name like 'b%' OR lower(city.Region.Name) = 'hello world' OR city.Region.Id != 1",
-                Optional.empty(),
-                Optional.of("fare > 0 OR city.Name like 'b%' OR lower(city.Region.Name) = 'hello world' OR city.Region.Id != 1"),
-                sessionHolder);
-        testFilter("fare > 0 OR city.Name like 'b%' OR city.Region.Id != 1",
-                Optional.of("((fare > 0 OR city.Name: \"b*\") OR NOT city.Region.Id: 1)"),
-                Optional.empty(),
-                sessionHolder);
-    }
-
-    @Test
-    public void testAndPushdown()
-    {
-        SessionHolder sessionHolder = new SessionHolder();
-
-        testFilter("fare > 0 AND city.Name like 'b%'", Optional.of("(fare > 0 AND city.Name: \"b*\")"), Optional.empty(), sessionHolder);
-        testFilter("lower(city.Region.Name) = 'hello world' AND city.Region.Id != 1", Optional.of("(NOT city.Region.Id: 1)"), Optional.of("lower(city.Region.Name) = 'hello world'"),
-                sessionHolder);
-
-        // Multiple ANDs
-        testFilter("fare > 0 AND city.Name like 'b%' AND lower(city.Region.Name) = 'hello world' AND city.Region.Id != 1",
-                Optional.of("(((fare > 0 AND city.Name: \"b*\")) AND NOT city.Region.Id: 1)"),
-                Optional.of("(lower(city.Region.Name) = 'hello world')"),
-                sessionHolder);
-        testFilter("fare > 0 AND city.Name like '%b%' AND lower(city.Region.Name) = 'hello world' AND city.Region.Id != 1",
-                Optional.of("(((fare > 0)) AND NOT city.Region.Id: 1)"),
-                Optional.of("city.Name like '%b%' AND lower(city.Region.Name) = 'hello world'"),
-                sessionHolder);
-    }
-
-    @Test
-    public void testNotPushdown()
-    {
-        SessionHolder sessionHolder = new SessionHolder();
-
-        testFilter("city.Region.Name NOT LIKE 'hello%'", Optional.of("NOT city.Region.Name: \"hello*\""), Optional.empty(), sessionHolder);
-        testFilter("NOT (city.Region.Name LIKE 'hello%')", Optional.of("NOT city.Region.Name: \"hello*\""), Optional.empty(), sessionHolder);
-        testFilter("city.Name != 'hello world'", Optional.of("NOT city.Name: \"hello world\""), Optional.empty(), sessionHolder);
-        testFilter("city.Name <> 'hello world'", Optional.of("NOT city.Name: \"hello world\""), Optional.empty(), sessionHolder);
-        testFilter("NOT (city.Name = 'hello world')", Optional.of("NOT city.Name: \"hello world\""), Optional.empty(), sessionHolder);
-        testFilter("fare != 0", Optional.of("NOT fare: 0"), Optional.empty(), sessionHolder);
-        testFilter("fare <> 0", Optional.of("NOT fare: 0"), Optional.empty(), sessionHolder);
-        testFilter("NOT (fare = 0)", Optional.of("NOT fare: 0"), Optional.empty(), sessionHolder);
-
-        // Multiple NOTs
-        testFilter("NOT (NOT fare = 0)", Optional.of("NOT NOT fare: 0"), Optional.empty(), sessionHolder);
-        testFilter("NOT (fare = 0 AND city.Name = 'hello world')", Optional.of("NOT (fare: 0 AND city.Name: \"hello world\")"), Optional.empty(), sessionHolder);
-        testFilter("NOT (fare = 0 OR city.Name = 'hello world')", Optional.of("NOT (fare: 0 OR city.Name: \"hello world\")"), Optional.empty(), sessionHolder);
-    }
-
-    @Test
-    public void testInPushdown()
-    {
-        SessionHolder sessionHolder = new SessionHolder();
-
-        testFilter("city.Name IN ('hello world', 'hello world 2')", Optional.of("(city.Name: \"hello world\" OR city.Name: \"hello world 2\")"), Optional.empty(), sessionHolder);
-    }
-
-    @Test
-    public void testIsNullPushdown()
-    {
-        SessionHolder sessionHolder = new SessionHolder();
-
-        testFilter("city.Name IS NULL", Optional.of("NOT city.Name: *"), Optional.empty(), sessionHolder);
-        testFilter("city.Name IS NOT NULL", Optional.of("NOT NOT city.Name: *"), Optional.empty(), sessionHolder);
-        testFilter("NOT (city.Name IS NULL)", Optional.of("NOT NOT city.Name: *"), Optional.empty(), sessionHolder);
-    }
-
-    @Test
-    public void testComplexPushdown()
-    {
-        SessionHolder sessionHolder = new SessionHolder();
-
-        testFilter("(fare > 0 OR city.Name like 'b%') AND (lower(city.Region.Name) = 'hello world' OR city.Name IS NULL)",
-                Optional.of("((fare > 0 OR city.Name: \"b*\"))"),
-                Optional.of("(lower(city.Region.Name) = 'hello world' OR city.Name IS NULL)"),
-                sessionHolder);
-        testFilter("city.Region.Id = 1 AND (fare > 0 OR city.Name NOT like 'b%') AND (lower(city.Region.Name) = 'hello world' OR city.Name IS NULL)",
-                Optional.of("((city.Region.Id: 1 AND (fare > 0 OR NOT city.Name: \"b*\")))"),
-                Optional.of("lower(city.Region.Name) = 'hello world' OR city.Name IS NULL"),
-                sessionHolder);
-    }
-
-    @Test
-    public void testClpUdfFilter()
-    {
-        SessionHolder sessionHolder = new SessionHolder();
-        testFilter("CLP_GET_STRING('city.Name') = 'Beijing'", Optional.of("city.Name: \"Beijing\""),
-                Optional.empty(), sessionHolder);
-    }
-
-    @Test
-    public void testClpUdfScanProject() {
-        SessionHolder sessionHolder = new SessionHolder();
-        PlanBuilder planBuilder = new PlanBuilder(sessionHolder.getSession(), idAllocator, metadata);
-        ClpTableLayoutHandle tableLayoutHandle = new ClpTableLayoutHandle(table, Optional.empty());
-        TableHandle tableHandle = new TableHandle(
-                new ConnectorId("clp"),
-                table,
-                new ConnectorTransactionHandle() {},
-                Optional.of(tableLayoutHandle));
-
-        // SELECT CLP_GET_STRING('user') from default.test
-        PlanNode originalPlan = planBuilder.project(
-                planBuilder.tableScan(
-                    tableHandle, ImmutableList.of(), ImmutableMap.of()),
-                    Assignments.of(
-                            new VariableReferenceExpression(
-                                    Optional.empty(),
-                                    "clp_get_string",
-                                    VarcharType.VARCHAR),
-                            new CallExpression(
-                                    "clp_get_string",
-                                    new BuiltInFunctionHandle(
-                                            new Signature(
-                                                    new QualifiedObjectName(
-                                                            "presto",
-                                                            "default",
-                                                            "clp_get_string"),
-                                                    FunctionKind.SCALAR,
-                                                    TypeSignature.parseTypeSignature("varchar"),
-                                                    List.of(TypeSignature.parseTypeSignature("varchar")))),
-                                    VarcharType.VARCHAR,
-                                    List.of(new ConstantExpression(
-                                            Slices.utf8Slice("user"),
-                                            VarcharType.VARCHAR)))));
-
-        ClpPlanOptimizer optimizer = new ClpPlanOptimizer(functionAndTypeManager, standardFunctionResolution);
+        Plan plan = localQueryRunner.createPlan(
+                session,
+                "SELECT CLP_GET_STRING('user') from test WHERE CLP_GET_INT('user_id') = 0 AND LOWER(city.Name) = 'BEIJING'",
+                WarningCollector.NOOP);
+        ClpPlanOptimizer optimizer = new ClpPlanOptimizer(functionAndTypeManager, functionResolution);
         PlanNode optimizedPlan = optimizer.optimize(
-                originalPlan,
-                sessionHolder.getConnectorSession(),
+                plan.getRoot(),
+                session.toConnectorSession(),
                 null,
-                idAllocator);
+                new PlanNodeIdAllocator());
+        log.info(plan.toString());
+        PlanAssert.assertPlan(
+                session,
+                localQueryRunner.getMetadata(),
+                (node, sourceStats, lookup, s, types) -> PlanNodeStatsEstimate.unknown(),
+                new Plan(optimizedPlan, plan.getTypes(), StatsAndCosts.empty()),
+                anyTree(
+                    project(
+                            ImmutableMap.of(
+                                    "clp_get_string",
+                                    PlanMatchPattern.expression("user")
+                            ),
+                            filter(
+                                    expression("lower(city.Name) = 'BEIJING'"),
+                                    ClpTableScanMatcher.clpTableScanPattern(
+                                            new ClpTableLayoutHandle(table, Optional.of("(user_id: 0)")),
+                                            ImmutableSet.of(
+                                                    new ClpColumnHandle("user", VarcharType.VARCHAR, true),
+                                                    city))))));
+    }
+
+    @Test
+    public void testExample()
+    {
+        TransactionId transactionId = localQueryRunner.getTransactionManager().beginTransaction(false);
+        Session session = testSessionBuilder()
+                .setCatalog("clp")
+                .setSchema("default")
+                .setTransactionId(transactionId)
+                .build();
+
+        Plan plan = localQueryRunner.createPlan(
+                session,
+                "SELECT CLP_GET_STRING('user') FROM test",
+                WarningCollector.NOOP);
+        ClpPlanOptimizer optimizer = new ClpPlanOptimizer(functionAndTypeManager, functionResolution);
+        PlanNode optimizedPlan = optimizer.optimize(
+                plan.getRoot(),
+                session.toConnectorSession(),
+                null,
+                planNodeIdAllocator);
 
         PlanAssert.assertPlan(
-                sessionHolder.getSession(),
-                metadata,
-                (node, sourceStats, lookup, session, types) -> PlanNodeStatsEstimate.unknown(),
-                new Plan(optimizedPlan, typeProvider, StatsAndCosts.empty()),
-                project(
+                session,
+                localQueryRunner.getMetadata(),
+                (node, sourceStats, lookup, s, types) -> PlanNodeStatsEstimate.unknown(),
+                new Plan(optimizedPlan, plan.getTypes(), StatsAndCosts.empty()),
+                anyTree(project(
                         ImmutableMap.of(
                                 "clp_get_string",
                                 PlanMatchPattern.expression("user")
                         ),
                         ClpTableScanMatcher.clpTableScanPattern(
-                                tableLayoutHandle,
+                                new ClpTableLayoutHandle(
+                                        new ClpTableHandle(
+                                                new SchemaTableName("default", "test"),
+                                                ClpTableHandle.StorageType.FS),
+                                        Optional.empty()),
                                 ImmutableSet.of(new ClpColumnHandle("user", VarcharType.VARCHAR, true))
-                        )));
-    }
-
-    @Test
-    public void testClpUdfScanFilterProject() {
-        SessionHolder sessionHolder = new SessionHolder();
-        PlanBuilder planBuilder = new PlanBuilder(sessionHolder.getSession(), idAllocator, metadata);
-        ClpTableLayoutHandle tableLayoutHandle = new ClpTableLayoutHandle(table, Optional.empty());
-        TableHandle tableHandle = new TableHandle(
-                new ConnectorId("clp"),
-                table,
-                new ConnectorTransactionHandle() {},
-                Optional.of(tableLayoutHandle));
-
-        RowExpression rowExpression = getRowExpression(
-                "CLP_GET_INT('user_id') = 0 AND LOWER(city.Name) = 'BEIJING'",
-                sessionHolder);
-
-        VariableReferenceExpression cityVariable = new VariableReferenceExpression(
-                Optional.empty(),
-                "city",
-                RowType.from(ImmutableList.of(
-                        RowType.field("Name", VARCHAR),
-                        RowType.field("Region", RowType.from(
-                                ImmutableList.of(
-                                        RowType.field("Id", BIGINT),
-                                        RowType.field("Name", VARCHAR)))))));
-
-        // SELECT CLP_GET_STRING('user') from default.test WHERE CLP_GET_INT('user_id') = 0 AND LOWER(city.Name) = 'BEIJING'
-        // should be optimized to
-        // SELECT user from default.test where LOWER(city.Name) = 'BEIJING' (KQL: user_id: 0)
-        PlanNode originalPlan = planBuilder.project(
-                planBuilder.filter(
-                        rowExpression,
-                        planBuilder.tableScan(
-                                tableHandle,
-                                ImmutableList.of(cityVariable),
-                                ImmutableMap.of(cityVariable, city))
-                ),
-                Assignments.of(
-                        new VariableReferenceExpression(
-                                Optional.empty(),
-                                "clp_get_string",
-                                VarcharType.VARCHAR),
-                        new CallExpression(
-                                "clp_get_string",
-                                new BuiltInFunctionHandle(
-                                        new Signature(
-                                                new QualifiedObjectName(
-                                                        "presto",
-                                                        "default",
-                                                        "clp_get_string"),
-                                                FunctionKind.SCALAR,
-                                                TypeSignature.parseTypeSignature("varchar"),
-                                                List.of(TypeSignature.parseTypeSignature("varchar")))),
-                                VarcharType.VARCHAR,
-                                List.of(new ConstantExpression(
-                                        Slices.utf8Slice("user"),
-                                        VarcharType.VARCHAR)))));
-
-        ClpPlanOptimizer optimizer = new ClpPlanOptimizer(functionAndTypeManager, standardFunctionResolution);
-        PlanNode optimizedPlan = optimizer.optimize(
-                originalPlan,
-                sessionHolder.getConnectorSession(),
-                null,
-                idAllocator);
-
-        PlanAssert.assertPlan(
-                sessionHolder.getSession(),
-                metadata,
-                (node, sourceStats, lookup, session, types) -> PlanNodeStatsEstimate.unknown(),
-                new Plan(optimizedPlan, typeProvider, StatsAndCosts.empty()),
-                project(
-                        ImmutableMap.of(
-                                "clp_get_string",
-                                PlanMatchPattern.expression("user")
-                        ),
-                        filter(
-                                expression("lower(city.Name) = 'BEIJING'"),
-                                ClpTableScanMatcher.clpTableScanPattern(
-                                        new ClpTableLayoutHandle(table, Optional.of("(user_id: 0)")),
-                                        ImmutableSet.of(
-                                                new ClpColumnHandle("user", VarcharType.VARCHAR, true),
-                                                city)))));
+                        ))));
     }
 
     private static final class ClpTableScanMatcher
@@ -429,7 +218,12 @@ public class TestClpPlanOptimizer
         }
 
         @Override
-        public MatchResult detailMatches(PlanNode node, StatsProvider stats, Session session, Metadata metadata, SymbolAliases symbolAliases)
+        public MatchResult detailMatches(
+                PlanNode node,
+                StatsProvider stats,
+                Session session,
+                Metadata metadata,
+                SymbolAliases symbolAliases)
         {
             checkState(shapeMatches(node), "Plan testing framework error: shapeMatches returned false");
             TableScanNode tableScanNode = (TableScanNode) node;
