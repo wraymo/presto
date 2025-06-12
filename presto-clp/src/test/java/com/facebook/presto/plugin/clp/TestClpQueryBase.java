@@ -98,8 +98,6 @@ public class TestClpQueryBase
                             ch -> ch));
     protected final TypeProvider typeProvider = TypeProvider.fromVariables(variableToColumnHandleMap.keySet());
 
-    PlanNodeIdAllocator idAllocator = new PlanNodeIdAllocator();
-
     protected static class SessionHolder
     {
         private final ConnectorSession connectorSession;

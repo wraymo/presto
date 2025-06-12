@@ -154,7 +154,48 @@ public class TestClpPlanOptimizer
     }
 
     @Test
-    public void testExample()
+    public void testScanProject()
+    {
+        TransactionId transactionId = localQueryRunner.getTransactionManager().beginTransaction(false);
+        Session session = testSessionBuilder()
+                .setCatalog("clp")
+                .setSchema("default")
+                .setTransactionId(transactionId)
+                .build();
+
+        Plan plan = localQueryRunner.createPlan(
+                session,
+                "SELECT CLP_GET_STRING('user') FROM test",
+                WarningCollector.NOOP);
+        ClpPlanOptimizer optimizer = new ClpPlanOptimizer(functionAndTypeManager, functionResolution);
+        PlanNode optimizedPlan = optimizer.optimize(
+                plan.getRoot(),
+                session.toConnectorSession(),
+                null,
+                planNodeIdAllocator);
+
+        PlanAssert.assertPlan(
+                session,
+                localQueryRunner.getMetadata(),
+                (node, sourceStats, lookup, s, types) -> PlanNodeStatsEstimate.unknown(),
+                new Plan(optimizedPlan, plan.getTypes(), StatsAndCosts.empty()),
+                anyTree(project(
+                        ImmutableMap.of(
+                                "clp_get_string",
+                                PlanMatchPattern.expression("user")
+                        ),
+                        ClpTableScanMatcher.clpTableScanPattern(
+                                new ClpTableLayoutHandle(
+                                        new ClpTableHandle(
+                                                new SchemaTableName("default", "test"),
+                                                ClpTableHandle.StorageType.FS),
+                                        Optional.empty()),
+                                ImmutableSet.of(new ClpColumnHandle("user", VarcharType.VARCHAR, true))
+                        ))));
+    }
+
+    @Test
+    public void testScanFilter()
     {
         TransactionId transactionId = localQueryRunner.getTransactionManager().beginTransaction(false);
         Session session = testSessionBuilder()
