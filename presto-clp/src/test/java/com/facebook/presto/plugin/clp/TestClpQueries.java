@@ -16,206 +16,238 @@ package com.facebook.presto.plugin.clp;
 import com.facebook.airlift.log.Logger;
 import com.facebook.presto.Session;
 import com.facebook.presto.common.transaction.TransactionId;
+import com.facebook.presto.common.type.VarcharType;
+import com.facebook.presto.cost.PlanNodeStatsEstimate;
+import com.facebook.presto.cost.StatsAndCosts;
+import com.facebook.presto.cost.StatsProvider;
+import com.facebook.presto.metadata.FunctionAndTypeManager;
+import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.plugin.clp.metadata.ClpNodeType;
+import com.facebook.presto.spi.ColumnHandle;
+import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.WarningCollector;
+import com.facebook.presto.spi.plan.PlanNode;
+import com.facebook.presto.spi.plan.PlanNodeIdAllocator;
+import com.facebook.presto.spi.plan.TableScanNode;
+import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.facebook.presto.sql.planner.Plan;
-import com.facebook.presto.testing.QueryRunner;
-import com.facebook.presto.tests.AbstractTestQueryFramework;
-import com.facebook.presto.tests.DistributedQueryRunner;
+import com.facebook.presto.sql.planner.assertions.MatchResult;
+import com.facebook.presto.sql.planner.assertions.Matcher;
+import com.facebook.presto.sql.planner.assertions.PlanAssert;
+import com.facebook.presto.sql.planner.assertions.PlanMatchPattern;
+import com.facebook.presto.sql.planner.assertions.SymbolAliases;
+import com.facebook.presto.sql.relational.FunctionResolution;
+import com.facebook.presto.sql.tree.SymbolReference;
+import com.facebook.presto.testing.LocalQueryRunner;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import org.apache.commons.math3.util.Pair;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import java.io.File;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.util.Arrays;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
+import static com.facebook.presto.common.Utils.checkState;
+import static com.facebook.presto.metadata.FunctionExtractor.extractFunctions;
+import static com.facebook.presto.plugin.clp.ClpMetadataDbSetUp.metadataDbPassword;
+import static com.facebook.presto.plugin.clp.ClpMetadataDbSetUp.metadataDbTablePrefix;
+import static com.facebook.presto.plugin.clp.ClpMetadataDbSetUp.metadataDbUrlTemplate;
+import static com.facebook.presto.plugin.clp.ClpMetadataDbSetUp.metadataDbUser;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.anyTree;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.filter;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.node;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.project;
 import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
-import static org.testng.Assert.fail;
 
 public class TestClpQueries
-        extends AbstractTestQueryFramework
+    extends TestClpQueryBase
 {
     private static final Logger log = Logger.get(TestClpQueries.class);
-    private final String metadataDbUrl = "jdbc:h2:file:/tmp/metadata_query_testdb;MODE=MySQL;DATABASE_TO_UPPER=FALSE";
-    private final String metadataDbTablePrefix = "clp_";
-    private static final String TABLE_NAME = "test";
+    private final String databaseName = "metadata_query_testdb";
     private final Session defaultSession = testSessionBuilder()
             .setCatalog("clp")
             .setSchema(ClpMetadata.DEFAULT_SCHEMA_NAME)
             .build();
 
+    private ClpMetadataDbSetUp clpMetadataDbSetUp;
+
+    private LocalQueryRunner localQueryRunner;
+    private FunctionAndTypeManager functionAndTypeManager;
+    private FunctionResolution functionResolution;
+    private PlanNodeIdAllocator planNodeIdAllocator;
+
     @BeforeMethod
     public void setUp()
     {
-        final String metadataDbUser = "sa";
-        final String metadataDbPassword = "";
-        final String columnMetadataTableSuffix = "_column_metadata";
-        final String datasetsTableSuffix = "datasets";
-        final String datasetsTableName = metadataDbTablePrefix + datasetsTableSuffix;
-        final String columnMetadataTableName = metadataDbTablePrefix + TABLE_NAME + columnMetadataTableSuffix;
+        clpMetadataDbSetUp = new ClpMetadataDbSetUp();
+        clpMetadataDbSetUp.setupMetadata(databaseName,
+                ImmutableMap.of(
+                        "test",
+                        ImmutableList.of(
+                                new Pair<>("city.Name", ClpNodeType.ClpString),
+                                new Pair<>("city.Region.Id", ClpNodeType.Integer),
+                                new Pair<>("city.Region.Name", ClpNodeType.VarString),
+                                new Pair<>("fare", ClpNodeType.Float),
+                                new Pair<>("isHoliday", ClpNodeType.Boolean))));
 
-        final String createTableMetadataSQL = String.format(
-                "CREATE TABLE IF NOT EXISTS %s (" +
-                        " name VARCHAR(255) PRIMARY KEY," +
-                        " archive_storage_type VARCHAR(4096) NOT NULL," +
-                        " archive_storage_directory VARCHAR(4096) NOT NULL)", datasetsTableName);
-
-        final String createColumnMetadataSQL = String.format(
-                "CREATE TABLE IF NOT EXISTS %s (" +
-                        " name VARCHAR(512) NOT NULL," +
-                        " type TINYINT NOT NULL," +
-                        " PRIMARY KEY (name, type))", columnMetadataTableName);
-
-        final String insertTableMetadataSQL = String.format(
-                "INSERT INTO %s (name, archive_storage_type, archive_storage_directory) VALUES (?, ?, ?)", datasetsTableName);
-
-        final String insertColumnMetadataSQL = String.format(
-                "INSERT INTO %s (name, type) VALUES (?, ?)", columnMetadataTableName);
-
-        try (Connection conn = DriverManager.getConnection(metadataDbUrl, metadataDbUser, metadataDbPassword);
-                Statement stmt = conn.createStatement()) {
-            stmt.execute(createTableMetadataSQL);
-            stmt.execute(createColumnMetadataSQL);
-
-            // Insert table metadata
-            try (PreparedStatement pstmt = conn.prepareStatement(insertTableMetadataSQL)) {
-                pstmt.setString(1, TABLE_NAME);
-                pstmt.setString(2, "fs");
-                pstmt.setString(3, "/tmp/archives/" + TABLE_NAME);
-                pstmt.executeUpdate();
-            }
-
-            // Insert column metadata in batch
-            List<Pair<String, ClpNodeType>> records = Arrays.asList(
-                    new Pair<>("a", ClpNodeType.Integer),
-                    new Pair<>("a", ClpNodeType.VarString),
-                    new Pair<>("b", ClpNodeType.Float),
-                    new Pair<>("b", ClpNodeType.ClpString),
-                    new Pair<>("c.d", ClpNodeType.Boolean),
-                    new Pair<>("c.e", ClpNodeType.VarString),
-                    new Pair<>("f.g.h", ClpNodeType.UnstructuredArray));
-
-            try (PreparedStatement pstmt = conn.prepareStatement(insertColumnMetadataSQL)) {
-                for (Pair<String, ClpNodeType> record : records) {
-                    pstmt.setString(1, record.getFirst());
-                    pstmt.setByte(2, record.getSecond().getType());
-                    pstmt.addBatch();
-                }
-                pstmt.executeBatch();
-            }
-        }
-        catch (SQLException e) {
-            fail(e.getMessage());
-        }
+        localQueryRunner = new LocalQueryRunner(defaultSession);
+        localQueryRunner.createCatalog("clp", new ClpConnectorFactory(), ImmutableMap.of(
+                "clp.metadata-db-url", String.format(metadataDbUrlTemplate, databaseName),
+                "clp.metadata-db-user", metadataDbUser,
+                "clp.metadata-db-password", metadataDbPassword,
+                "clp.metadata-table-prefix", metadataDbTablePrefix));
+        localQueryRunner.getMetadata().registerBuiltInFunctions(extractFunctions(new ClpPlugin().getFunctions()));
+        functionAndTypeManager = localQueryRunner.getMetadata().getFunctionAndTypeManager();
+        functionResolution = new FunctionResolution(functionAndTypeManager.getFunctionAndTypeResolver());
+        planNodeIdAllocator = new PlanNodeIdAllocator();
     }
 
     @AfterMethod
     public void tearDown()
     {
-        File dbFile = new File("/tmp/metadata_query_testdb.mv.db");
-        File lockFile = new File("/tmp/metadata_query_testdb.trace.db"); // Optional, H2 sometimes creates this
-        if (dbFile.exists()) {
-            dbFile.delete();
-            System.out.println("Deleted database file: " + dbFile.getAbsolutePath());
-        }
-        if (lockFile.exists()) {
-            lockFile.delete();
-        }
+        clpMetadataDbSetUp.tearDown(databaseName);
     }
 
     @Test
-    public void testExample()
-    {
-        TransactionId transactionId = getQueryRunner().getTransactionManager().beginTransaction(false);
+    public void testScanProjectFilter() {
+        TransactionId transactionId = localQueryRunner.getTransactionManager().beginTransaction(false);
         Session session = testSessionBuilder()
                 .setCatalog("clp")
                 .setSchema("default")
                 .setTransactionId(transactionId)
                 .build();
 
-        Plan plan = getQueryRunner().createPlan(
+        Plan plan = localQueryRunner.createPlan(
                 session,
-//                "SELECT CLP_GET_STRING('city.Name') FROM test WHERE CLP_GET_INT('city.Region.Id') = 1",
-
-                "SELECT * FROM test WHERE CLP_GET_INT('city.Region.Id') = 1",
+                "SELECT CLP_GET_STRING('user') from test WHERE CLP_GET_INT('user_id') = 0 AND LOWER(city.Name) = 'BEIJING'",
                 WarningCollector.NOOP);
+        ClpPlanOptimizer optimizer = new ClpPlanOptimizer(functionAndTypeManager, functionResolution);
+        PlanNode optimizedPlan = optimizer.optimize(
+                plan.getRoot(),
+                session.toConnectorSession(),
+                null,
+                new PlanNodeIdAllocator());
         log.info(plan.toString());
-//        PlanAssert.assertPlan(
-//                session,
-//                getQueryRunner().getMetadata(),
-//                (node, sourceStats, lookup, s, types) -> PlanNodeStatsEstimate.unknown(),
-//                plan,
-//                anyTree(project(
-//                            ImmutableMap.of(
-//                            "city.Name", expression("city.Name")),
-//                            filter(
-//                "city.Region.Id = 1",
-//                                tableScan("test", ImmutableMap.of(
-//                                    "city.Name", "city.Name",
-//                                    "city.Region.Id", "city.Region.Id"))))));
-//        PlanAssert.assertPlan(
-//                session,
-//                getQueryRunner().getMetadata(),
-//                (node, sourceStats, lookup, s, types) -> PlanNodeStatsEstimate.unknown(),
-//                plan,
-//                anyTree(
-//                        tableScan("test", ImmutableMap.of(
-//                                "city.Name", "city.Name",
-//                                "city.Region.Id", "city.Region.Id"))));
-//        assertPlan(
-//                "SELECT a_bigint, c.e FROM test where c.d = true AND a_varchar = 'cc'",
-//                anyTree(project(
-//                        ImmutableMap.of("a_bigint", expression("a_bigint"), // output symbols and their expressions
-//                                        "c.e", expression("c.e")),
-//                        filter(
-//                                "(\"c.d\" = true) AND (\"a_varchar\" = CAST('cc' AS VARCHAR))",
-//                                tableScan("test", ImmutableMap.of(
-//                                        "a_bigint", "a_bigint",
-//                                        "c.e", "c.e",
-//                                        "c.d", "c.d",
-//                                        "a_varchar", "a_varchar"))))));
-//        assertPlan(
-//                "SELECT a_bigint, c.e FROM test WHERE c.d = true AND a_varchar = 'cc'",
-//                anyTree(
-//                        scanFilterProject(
-//                                tableScan("test", ImmutableMap.of(
-//                                        "a_bigint", "a_bigint",
-//                                        "a_varchar", "a_varchar",
-//                                        "c", "c")),
-//                                ImmutableMap.of(
-//                                        "expr", expression("dereference(c, 1)"), // this matches the 'expr := DEREFERENCE(c, 1)' from the real plan
-//                                        "a_bigint", expression("a_bigint")),
-//                                expression("((a_varchar = CAST('cc' AS VARCHAR)) AND (dereference(c, 0) = true))"))));
+        PlanAssert.assertPlan(
+                session,
+                localQueryRunner.getMetadata(),
+                (node, sourceStats, lookup, s, types) -> PlanNodeStatsEstimate.unknown(),
+                new Plan(optimizedPlan, plan.getTypes(), StatsAndCosts.empty()),
+                anyTree(
+                    project(
+                            ImmutableMap.of(
+                                    "clp_get_string",
+                                    PlanMatchPattern.expression("user")
+                            ),
+                            filter(
+                                    expression("lower(city.Name) = 'BEIJING'"),
+                                    ClpTableScanMatcher.clpTableScanPattern(
+                                            new ClpTableLayoutHandle(table, Optional.of("(user_id: 0)")),
+                                            ImmutableSet.of(
+                                                    new ClpColumnHandle("user", VarcharType.VARCHAR, true),
+                                                    city))))));
     }
 
-//    private Plan getQueryPlan(String sql)
-//    {
-//        return getQueryRunner().createPlan(defaultSession, sql, WarningCollector.NOOP);
-//    }
-
-    @Override
-    protected QueryRunner createQueryRunner() throws Exception
+    @Test
+    public void testExample()
     {
-        DistributedQueryRunner queryRunner = DistributedQueryRunner.builder(defaultSession)
-                .setNodeCount(3)
+        TransactionId transactionId = localQueryRunner.getTransactionManager().beginTransaction(false);
+        Session session = testSessionBuilder()
+                .setCatalog("clp")
+                .setSchema("default")
+                .setTransactionId(transactionId)
                 .build();
-        queryRunner.installPlugin(new ClpPlugin());
-        queryRunner.createCatalog(
-                defaultSession.getCatalog().get(),
-                "clp",
-                ImmutableMap.of(
-                        "clp.metadata-db-url", metadataDbUrl,
-                        "clp.metadata-db-user", "sa",
-                        "clp.metadata-db-password", "",
-                        "clp.metadata-table-prefix", metadataDbTablePrefix));
-        return queryRunner;
+
+        Plan plan = localQueryRunner.createPlan(
+                session,
+                "SELECT CLP_GET_STRING('user') FROM test",
+                WarningCollector.NOOP);
+        ClpPlanOptimizer optimizer = new ClpPlanOptimizer(functionAndTypeManager, functionResolution);
+        PlanNode optimizedPlan = optimizer.optimize(
+                plan.getRoot(),
+                session.toConnectorSession(),
+                null,
+                planNodeIdAllocator);
+
+        PlanAssert.assertPlan(
+                session,
+                localQueryRunner.getMetadata(),
+                (node, sourceStats, lookup, s, types) -> PlanNodeStatsEstimate.unknown(),
+                new Plan(optimizedPlan, plan.getTypes(), StatsAndCosts.empty()),
+                anyTree(project(
+                        ImmutableMap.of(
+                                "clp_get_string",
+                                PlanMatchPattern.expression("user")
+                        ),
+                        ClpTableScanMatcher.clpTableScanPattern(
+                                new ClpTableLayoutHandle(
+                                        new ClpTableHandle(
+                                                new SchemaTableName("default", "test"),
+                                                ClpTableHandle.StorageType.FS),
+                                        Optional.empty()),
+                                ImmutableSet.of(new ClpColumnHandle("user", VarcharType.VARCHAR, true))
+                        ))));
+    }
+
+    private static final class ClpTableScanMatcher
+            implements Matcher
+    {
+        private final ClpTableLayoutHandle expectedLayoutHandle;
+        private final Set<ColumnHandle> expectedColumns;
+
+        static PlanMatchPattern clpTableScanPattern(ClpTableLayoutHandle layoutHandle, Set<ColumnHandle> columns)
+        {
+            return node(TableScanNode.class).with(new ClpTableScanMatcher(layoutHandle, columns));
+        }
+
+        private ClpTableScanMatcher(ClpTableLayoutHandle expectedLayoutHandle, Set<ColumnHandle> expectedColumns)
+        {
+            this.expectedLayoutHandle = expectedLayoutHandle;
+            this.expectedColumns = expectedColumns;
+        }
+
+        @Override
+        public boolean shapeMatches(PlanNode node)
+        {
+            return node instanceof TableScanNode;
+        }
+
+        @Override
+        public MatchResult detailMatches(
+                PlanNode node,
+                StatsProvider stats,
+                Session session,
+                Metadata metadata,
+                SymbolAliases symbolAliases)
+        {
+            checkState(shapeMatches(node), "Plan testing framework error: shapeMatches returned false");
+            TableScanNode tableScanNode = (TableScanNode) node;
+            ClpTableLayoutHandle actualLayoutHandle = (ClpTableLayoutHandle) tableScanNode.getTable().getLayout().get();
+
+            // Check layout handle
+            if (!expectedLayoutHandle.equals(actualLayoutHandle)) {
+                return MatchResult.NO_MATCH;
+            }
+
+            // Check assignments contain expected columns
+            Map<VariableReferenceExpression, ColumnHandle> actualAssignments = tableScanNode.getAssignments();
+            Set<ColumnHandle> actualColumns = new HashSet<>(actualAssignments.values());
+
+            if (!expectedColumns.equals(actualColumns)) {
+                return MatchResult.NO_MATCH;
+            }
+
+            SymbolAliases.Builder aliasesBuilder = SymbolAliases.builder();
+            for (VariableReferenceExpression variable : tableScanNode.getOutputVariables()) {
+                aliasesBuilder.put(variable.getName(), new SymbolReference(variable.getName()));
+            }
+
+            return MatchResult.match(aliasesBuilder.build());
+        }
     }
 }

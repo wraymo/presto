@@ -29,8 +29,10 @@ import com.facebook.presto.metadata.SchemaPropertyManager;
 import com.facebook.presto.metadata.TablePropertyManager;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorSession;
+import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.WarningCollector;
 import com.facebook.presto.spi.function.StandardFunctionResolution;
+import com.facebook.presto.spi.plan.PlanNodeIdAllocator;
 import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.facebook.presto.sql.ExpressionUtils;
@@ -77,12 +79,16 @@ public class TestClpQueryBase
             new AnalyzePropertyManager(),
             createTestTransactionManager(new CatalogManager()));
 
-    protected static final ClpColumnHandle city = new ClpColumnHandle("city", RowType.from(ImmutableList.of(
-            RowType.field("Name", VARCHAR),
-            RowType.field("Region", RowType.from(ImmutableList.of(
-                    RowType.field("Id", BIGINT),
-                    RowType.field("Name", VARCHAR)
-            ))))), true);
+    protected static final ClpTableHandle table = new ClpTableHandle(
+            new SchemaTableName("default", "test"), ClpTableHandle.StorageType.FS);
+    protected static final ClpColumnHandle city = new ClpColumnHandle(
+            "city",
+            RowType.from(ImmutableList.of(
+                    RowType.field("Region", RowType.from(ImmutableList.of(
+                            RowType.field("Id", BIGINT),
+                            RowType.field("Name", VARCHAR)))),
+                    RowType.field("Name", VARCHAR))),
+            true);
     protected static final ClpColumnHandle fare = new ClpColumnHandle("fare", DOUBLE, true);
     protected static final ClpColumnHandle isHoliday = new ClpColumnHandle("isHoliday", BOOLEAN, true);
     protected static final Map<VariableReferenceExpression, ColumnHandle> variableToColumnHandleMap =
@@ -91,6 +97,8 @@ public class TestClpQueryBase
                             ch -> new VariableReferenceExpression(Optional.empty(), ch.getColumnName(), ch.getColumnType()),
                             ch -> ch));
     protected final TypeProvider typeProvider = TypeProvider.fromVariables(variableToColumnHandleMap.keySet());
+
+    PlanNodeIdAllocator idAllocator = new PlanNodeIdAllocator();
 
     protected static class SessionHolder
     {

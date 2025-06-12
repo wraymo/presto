@@ -13,13 +13,56 @@
  */
 package com.facebook.presto.plugin.clp;
 
+import com.facebook.presto.Session;
+import com.facebook.presto.common.QualifiedObjectName;
+import com.facebook.presto.common.type.RowType;
+import com.facebook.presto.common.type.TypeSignature;
+import com.facebook.presto.common.type.VarcharType;
+import com.facebook.presto.cost.PlanNodeStatsEstimate;
+import com.facebook.presto.cost.StatsAndCosts;
+import com.facebook.presto.cost.StatsProvider;
+import com.facebook.presto.metadata.BuiltInFunctionHandle;
+import com.facebook.presto.metadata.Metadata;
+import com.facebook.presto.spi.ColumnHandle;
+import com.facebook.presto.spi.ConnectorId;
+import com.facebook.presto.spi.TableHandle;
+import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
+import com.facebook.presto.spi.function.FunctionKind;
+import com.facebook.presto.spi.function.Signature;
+import com.facebook.presto.spi.plan.Assignments;
+import com.facebook.presto.spi.plan.PlanNode;
+import com.facebook.presto.spi.plan.TableScanNode;
+import com.facebook.presto.spi.relation.CallExpression;
+import com.facebook.presto.spi.relation.ConstantExpression;
 import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.relation.VariableReferenceExpression;
+import com.facebook.presto.sql.planner.Plan;
+import com.facebook.presto.sql.planner.assertions.MatchResult;
+import com.facebook.presto.sql.planner.assertions.Matcher;
+import com.facebook.presto.sql.planner.assertions.PlanAssert;
+import com.facebook.presto.sql.planner.assertions.PlanMatchPattern;
+import com.facebook.presto.sql.planner.assertions.SymbolAliases;
+import com.facebook.presto.sql.planner.iterative.rule.test.PlanBuilder;
+
+import com.facebook.presto.sql.tree.SymbolReference;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import io.airlift.slice.Slices;
 import org.testng.annotations.Test;
 
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
+import static com.facebook.presto.common.Utils.checkState;
+import static com.facebook.presto.common.type.BigintType.BIGINT;
+import static com.facebook.presto.common.type.VarcharType.VARCHAR;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.filter;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.node;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.project;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
@@ -213,10 +256,204 @@ public class TestClpPlanOptimizer
     }
 
     @Test
-    public void testClpUdf()
+    public void testClpUdfFilter()
     {
         SessionHolder sessionHolder = new SessionHolder();
         testFilter("CLP_GET_STRING('city.Name') = 'Beijing'", Optional.of("city.Name: \"Beijing\""),
                 Optional.empty(), sessionHolder);
+    }
+
+    @Test
+    public void testClpUdfScanProject() {
+        SessionHolder sessionHolder = new SessionHolder();
+        PlanBuilder planBuilder = new PlanBuilder(sessionHolder.getSession(), idAllocator, metadata);
+        ClpTableLayoutHandle tableLayoutHandle = new ClpTableLayoutHandle(table, Optional.empty());
+        TableHandle tableHandle = new TableHandle(
+                new ConnectorId("clp"),
+                table,
+                new ConnectorTransactionHandle() {},
+                Optional.of(tableLayoutHandle));
+
+        // SELECT CLP_GET_STRING('user') from default.test
+        PlanNode originalPlan = planBuilder.project(
+                planBuilder.tableScan(
+                    tableHandle, ImmutableList.of(), ImmutableMap.of()),
+                    Assignments.of(
+                            new VariableReferenceExpression(
+                                    Optional.empty(),
+                                    "clp_get_string",
+                                    VarcharType.VARCHAR),
+                            new CallExpression(
+                                    "clp_get_string",
+                                    new BuiltInFunctionHandle(
+                                            new Signature(
+                                                    new QualifiedObjectName(
+                                                            "presto",
+                                                            "default",
+                                                            "clp_get_string"),
+                                                    FunctionKind.SCALAR,
+                                                    TypeSignature.parseTypeSignature("varchar"),
+                                                    List.of(TypeSignature.parseTypeSignature("varchar")))),
+                                    VarcharType.VARCHAR,
+                                    List.of(new ConstantExpression(
+                                            Slices.utf8Slice("user"),
+                                            VarcharType.VARCHAR)))));
+
+        ClpPlanOptimizer optimizer = new ClpPlanOptimizer(functionAndTypeManager, standardFunctionResolution);
+        PlanNode optimizedPlan = optimizer.optimize(
+                originalPlan,
+                sessionHolder.getConnectorSession(),
+                null,
+                idAllocator);
+
+        PlanAssert.assertPlan(
+                sessionHolder.getSession(),
+                metadata,
+                (node, sourceStats, lookup, session, types) -> PlanNodeStatsEstimate.unknown(),
+                new Plan(optimizedPlan, typeProvider, StatsAndCosts.empty()),
+                project(
+                        ImmutableMap.of(
+                                "clp_get_string",
+                                PlanMatchPattern.expression("user")
+                        ),
+                        ClpTableScanMatcher.clpTableScanPattern(
+                                tableLayoutHandle,
+                                ImmutableSet.of(new ClpColumnHandle("user", VarcharType.VARCHAR, true))
+                        )));
+    }
+
+    @Test
+    public void testClpUdfScanFilterProject() {
+        SessionHolder sessionHolder = new SessionHolder();
+        PlanBuilder planBuilder = new PlanBuilder(sessionHolder.getSession(), idAllocator, metadata);
+        ClpTableLayoutHandle tableLayoutHandle = new ClpTableLayoutHandle(table, Optional.empty());
+        TableHandle tableHandle = new TableHandle(
+                new ConnectorId("clp"),
+                table,
+                new ConnectorTransactionHandle() {},
+                Optional.of(tableLayoutHandle));
+
+        RowExpression rowExpression = getRowExpression(
+                "CLP_GET_INT('user_id') = 0 AND LOWER(city.Name) = 'BEIJING'",
+                sessionHolder);
+
+        VariableReferenceExpression cityVariable = new VariableReferenceExpression(
+                Optional.empty(),
+                "city",
+                RowType.from(ImmutableList.of(
+                        RowType.field("Name", VARCHAR),
+                        RowType.field("Region", RowType.from(
+                                ImmutableList.of(
+                                        RowType.field("Id", BIGINT),
+                                        RowType.field("Name", VARCHAR)))))));
+
+        // SELECT CLP_GET_STRING('user') from default.test WHERE CLP_GET_INT('user_id') = 0 AND LOWER(city.Name) = 'BEIJING'
+        // should be optimized to
+        // SELECT user from default.test where LOWER(city.Name) = 'BEIJING' (KQL: user_id: 0)
+        PlanNode originalPlan = planBuilder.project(
+                planBuilder.filter(
+                        rowExpression,
+                        planBuilder.tableScan(
+                                tableHandle,
+                                ImmutableList.of(cityVariable),
+                                ImmutableMap.of(cityVariable, city))
+                ),
+                Assignments.of(
+                        new VariableReferenceExpression(
+                                Optional.empty(),
+                                "clp_get_string",
+                                VarcharType.VARCHAR),
+                        new CallExpression(
+                                "clp_get_string",
+                                new BuiltInFunctionHandle(
+                                        new Signature(
+                                                new QualifiedObjectName(
+                                                        "presto",
+                                                        "default",
+                                                        "clp_get_string"),
+                                                FunctionKind.SCALAR,
+                                                TypeSignature.parseTypeSignature("varchar"),
+                                                List.of(TypeSignature.parseTypeSignature("varchar")))),
+                                VarcharType.VARCHAR,
+                                List.of(new ConstantExpression(
+                                        Slices.utf8Slice("user"),
+                                        VarcharType.VARCHAR)))));
+
+        ClpPlanOptimizer optimizer = new ClpPlanOptimizer(functionAndTypeManager, standardFunctionResolution);
+        PlanNode optimizedPlan = optimizer.optimize(
+                originalPlan,
+                sessionHolder.getConnectorSession(),
+                null,
+                idAllocator);
+
+        PlanAssert.assertPlan(
+                sessionHolder.getSession(),
+                metadata,
+                (node, sourceStats, lookup, session, types) -> PlanNodeStatsEstimate.unknown(),
+                new Plan(optimizedPlan, typeProvider, StatsAndCosts.empty()),
+                project(
+                        ImmutableMap.of(
+                                "clp_get_string",
+                                PlanMatchPattern.expression("user")
+                        ),
+                        filter(
+                                expression("lower(city.Name) = 'BEIJING'"),
+                                ClpTableScanMatcher.clpTableScanPattern(
+                                        new ClpTableLayoutHandle(table, Optional.of("(user_id: 0)")),
+                                        ImmutableSet.of(
+                                                new ClpColumnHandle("user", VarcharType.VARCHAR, true),
+                                                city)))));
+    }
+
+    private static final class ClpTableScanMatcher
+            implements Matcher
+    {
+        private final ClpTableLayoutHandle expectedLayoutHandle;
+        private final Set<ColumnHandle> expectedColumns;
+
+        static PlanMatchPattern clpTableScanPattern(ClpTableLayoutHandle layoutHandle, Set<ColumnHandle> columns)
+        {
+            return node(TableScanNode.class).with(new ClpTableScanMatcher(layoutHandle, columns));
+        }
+
+        private ClpTableScanMatcher(ClpTableLayoutHandle expectedLayoutHandle, Set<ColumnHandle> expectedColumns)
+        {
+            this.expectedLayoutHandle = expectedLayoutHandle;
+            this.expectedColumns = expectedColumns;
+        }
+
+        @Override
+        public boolean shapeMatches(PlanNode node)
+        {
+            return node instanceof TableScanNode;
+        }
+
+        @Override
+        public MatchResult detailMatches(PlanNode node, StatsProvider stats, Session session, Metadata metadata, SymbolAliases symbolAliases)
+        {
+            checkState(shapeMatches(node), "Plan testing framework error: shapeMatches returned false");
+            TableScanNode tableScanNode = (TableScanNode) node;
+            ClpTableLayoutHandle actualLayoutHandle = (ClpTableLayoutHandle) tableScanNode.getTable().getLayout().get();
+
+            // Check layout handle
+            if (!expectedLayoutHandle.equals(actualLayoutHandle)) {
+                return MatchResult.NO_MATCH;
+            }
+
+            // Check assignments contain expected columns
+            Map<VariableReferenceExpression, ColumnHandle> actualAssignments = tableScanNode.getAssignments();
+            Set<ColumnHandle> actualColumns = new HashSet<>(actualAssignments.values());
+
+            if (!expectedColumns.equals(actualColumns)) {
+                return MatchResult.NO_MATCH;
+            }
+
+            SymbolAliases.Builder aliasesBuilder = SymbolAliases.builder();
+            for (VariableReferenceExpression variable : tableScanNode.getOutputVariables()) {
+                aliasesBuilder.put(variable.getName(), new SymbolReference(variable.getName()));
+            }
+
+            return MatchResult.match(aliasesBuilder.build());
+        }
     }
 }
