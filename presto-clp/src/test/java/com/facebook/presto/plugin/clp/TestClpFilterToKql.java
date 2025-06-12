@@ -15,10 +15,12 @@ package com.facebook.presto.plugin.clp;
 
 import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.relation.VariableReferenceExpression;
+import com.facebook.presto.sql.planner.TypeProvider;
 import org.testng.annotations.Test;
 
 import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
@@ -50,7 +52,19 @@ public class TestClpFilterToKql
 
         if (expectedRemainingExpression.isPresent()) {
             assertTrue(remainingExpression.isPresent());
-            assertEquals(remainingExpression.get(), getRowExpression(expectedRemainingExpression.get(), sessionHolder));
+            if (!clpUdfVariables.isEmpty()) {
+                Set<VariableReferenceExpression> newVariableSet = new HashSet<>(variableToColumnHandleMap.keySet());
+                for (VariableReferenceExpression var : clpUdfVariables) {
+                    newVariableSet.add(var);
+                }
+                TypeProvider newTypeProvider = TypeProvider.fromVariables(newVariableSet);
+                assertEquals(remainingExpression.get(),
+                        getRowExpression(expectedRemainingExpression.get(), newTypeProvider, sessionHolder));
+            }
+            else {
+                assertEquals(remainingExpression.get(),
+                        getRowExpression(expectedRemainingExpression.get(), sessionHolder));
+            }
         }
         else {
             assertFalse(remainingExpression.isPresent());
@@ -213,10 +227,26 @@ public class TestClpFilterToKql
     }
 
     @Test
-    public void testClpUdfFilter()
+    public void testClpUdf()
     {
         SessionHolder sessionHolder = new SessionHolder();
         testFilter("CLP_GET_STRING('city.Name') = 'Beijing'", Optional.of("city.Name: \"Beijing\""),
                 Optional.empty(), sessionHolder);
+        testFilter("CLP_GET_INT('id') = 1", Optional.of("id: 1"), Optional.empty(), sessionHolder);
+        testFilter("CLP_GET_FLOAT('fare') > 0", Optional.of("fare > 0"), Optional.empty(), sessionHolder);
+        testFilter("CLP_GET_BOOL('isHoliday') = true", Optional.of("isHoliday: true"), Optional.empty(), sessionHolder);
+
+        testFilter("cardinality(CLP_GET_STRING_ARRAY('clp_array')) = 2",
+                Optional.empty(),
+                Optional.of("cardinality(clp_array) = 2"),
+                sessionHolder);
+        testFilter("CLP_GET_STRING('city.Name') = 'Beijing' AND CLP_GET_INT('id') = 1 AND city.Region.Id = 1",
+                Optional.of("((city.Name: \"Beijing\" AND id: 1) AND city.Region.Id: 1)"),
+                Optional.empty(),
+                sessionHolder);
+        testFilter("lower(CLP_GET_STRING('user.Name')) = 'John' AND CLP_GET_INT('id') = 1 AND city.Region.Id = 1",
+                Optional.of("((id: 1) AND city.Region.Id: 1)"),
+                Optional.of("lower(\"user.Name\") = 'John'"),
+                sessionHolder);
     }
 }

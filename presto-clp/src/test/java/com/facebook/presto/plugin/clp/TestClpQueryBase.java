@@ -121,10 +121,17 @@ public class TestClpQueryBase
 
     public static Expression expression(String sql)
     {
-        return ExpressionUtils.rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(sql, new ParsingOptions(ParsingOptions.DecimalLiteralTreatment.AS_DECIMAL)));
+        return ExpressionUtils.rewriteIdentifiersToSymbolReferences(
+                new SqlParser().createExpression(sql,
+                        new ParsingOptions(ParsingOptions.DecimalLiteralTreatment.AS_DECIMAL)));
     }
 
     protected RowExpression toRowExpression(Expression expression, Session session)
+    {
+        return toRowExpression(expression, typeProvider, session);
+    }
+
+    protected RowExpression toRowExpression(Expression expression, TypeProvider typeProvider, Session session)
     {
         Map<NodeRef<Expression>, Type> expressionTypes = getExpressionTypes(
                 session,
@@ -139,6 +146,11 @@ public class TestClpQueryBase
 
     protected RowExpression getRowExpression(String sqlExpression, SessionHolder sessionHolder)
     {
-        return toRowExpression(expression(sqlExpression), sessionHolder.getSession());
+        return toRowExpression(expression(sqlExpression), typeProvider, sessionHolder.getSession());
+    }
+
+    protected RowExpression getRowExpression(String sqlExpression, TypeProvider typeProvider, SessionHolder sessionHolder)
+    {
+        return toRowExpression(expression(sqlExpression), typeProvider, sessionHolder.getSession());
     }
 }
