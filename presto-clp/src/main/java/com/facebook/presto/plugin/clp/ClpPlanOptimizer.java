@@ -217,10 +217,9 @@ public class ClpPlanOptimizer
                 remainingPredicate.get().accept(visitor, null);
                 // Retain only the variables that also exist in the remainingPredicate
                 clpUdfVariablesInFilterNode.retainAll(variablesInPredicate);
-            }
-
-            if (!clpUdfVariablesInFilterNode.isEmpty()) {
-                tableScanNode = buildNewTableScanNode(tableScanNode, clpUdfVariablesInFilterNode);
+                if (!clpUdfVariablesInFilterNode.isEmpty()) {
+                    tableScanNode = buildNewTableScanNode(tableScanNode, clpUdfVariablesInFilterNode);
+                }
             }
 
             if (kqlQuery.isPresent()) {
